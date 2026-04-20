@@ -1,0 +1,12 @@
+{
+  "skill_name": "corner-cases",
+  "evals": [
+    {
+      "id": 0,
+      "name": "list-refactor",
+      "prompt": "You are reviewing a C file for corner case programming. The `insert_at` function in /Users/marwan.burelle/code/ai-toolbox/skills/corner-cases/research/exercises/list/list-orig.c handles inserting an element into a sentinel-based linked list at a given position. The author split the logic into special cases (empty list, end of list, middle). Review this function for corner case programming and produce a refactored version.\n\nGoals:\n- Preserve observable behavior (same result for every input).\n- Eliminate any TRUE corner cases (redundant guards that the general logic already handles).\n- Minimize cyclomatic complexity and exit points.\n- If you find any latent bugs exposed by removing guards, fix them.\n\nSave the refactored file to OUTPUT_DIR/list.c (OUTPUT_DIR is provided to you as an absolute path). Also write OUTPUT_DIR/NOTES.md with a brief explanation of what you changed and why.",
+      "files": ["/Users/marwan.burelle/code/ai-toolbox/skills/corner-cases/research/exercises/list/list-orig.c"],
+      "assertions": []
+    }
+  ]
+}
