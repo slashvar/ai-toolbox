@@ -9,6 +9,7 @@ Each subdirectory under `skills/` is self-contained: it ships an installable `sk
 | Skill | Summary |
 |---|---|
 | [`corner-cases`](skills/corner-cases/) | Identify and eliminate corner case programming — an anti-pattern where code is split into too many specific sub-cases that the general case already handles. |
+| [`pr-self-review`](skills/pr-self-review/) | Cold-read self-review of an opened PR — a context-suppressed subagent reviews the diff, you triage findings in bulk, accepted fixes land as one commit. Auto-detects the stack (Go, Rust, JS/TS, Python, Java, Ruby) for idiom-aware review. |
 
 ## Layout convention
 
