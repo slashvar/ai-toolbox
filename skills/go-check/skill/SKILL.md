@@ -31,22 +31,31 @@ direct `golangci-lint` calls reproduce CI:
 grep -rA2 "golangci-lint-action" .github/workflows/ | grep version:
 # example output: "          version: v2.11.4"
 
-# Install (writes to $GOPATH/bin, overrides any older binary on $PATH):
+# Install (writes to $GOPATH/bin, overrides any older binary on $PATH).
+# The module path carries the major version: .../v2/... for a v2.x pin, and
+# .../golangci-lint/cmd/... (no /v2) for a v1.x pin.
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
 golangci-lint --version   # confirm
 ```
 
 **Re-run the install whenever the workflow's pinned version bumps** — `go install`
-does not auto-update. One-liner that always pulls whatever the workflow says today:
+does not auto-update. One-liner that always pulls whatever the workflow says today
+(the grep assumes the `version:` is within 2 lines of the action ref and is the
+only one in that window — `echo` it to sanity-check before installing):
 
 ```bash
 v=$(grep -rhA2 "golangci-lint-action" .github/workflows/ | sed -n 's/.*version: //p' | tr -d ' "' | head -1)
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@"$v"
+echo "pinned golangci-lint: $v"
+case "$v" in
+  v2*) mod=github.com/golangci/golangci-lint/v2/cmd/golangci-lint ;;
+  *)   mod=github.com/golangci/golangci-lint/cmd/golangci-lint ;;   # v1.x: no /v2 segment
+esac
+go install "$mod@$v"
 ```
 
-If a global install is undesirable (locked-down env),
-`go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<version> run <paths>`
-works per-invocation — slower, cached after first fetch.
+If a global install is undesirable (locked-down env), `go run <module>@<version>
+run <paths>` works per-invocation (use the same `/v2`-or-not module path as
+above) — slower, cached after first fetch.
 
 If the repo doesn't pin a version, just use the `golangci-lint` on `$PATH`.
 

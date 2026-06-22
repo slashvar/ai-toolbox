@@ -169,11 +169,13 @@ it, scoped to the touched packages. Otherwise build the changed packages
 directly. For a Go repo:
 
 ```bash
-# Build everything that this branch touches relative to its parent:
+# Build the packages this branch touches relative to its parent.
+# dirname maps each changed file to its package dir (a repo-root file -> "."),
+# and the sed prefixes "./" so go build treats them as package paths.
 REBASE_TARGET=origin/<target>
 git diff --name-only "$REBASE_TARGET"...HEAD -- '*.go' \
-  | sed 's|/[^/]*$||' | sort -u \
-  | xargs -I{} go build ./{}/...
+  | xargs -r -n1 dirname | sort -u | sed 's|^|./|' \
+  | xargs -r go build
 ```
 
 For other languages, substitute the repo's equivalent build/compile check. If
