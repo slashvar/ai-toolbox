@@ -44,10 +44,10 @@ gh pr view --json state --jq .state
 ```
 
 - **OPEN**: proceed to Step 3.
-- **MERGED**: skip to Step 5 (status). Tell the user the PR is already merged —
+- **MERGED**: skip to Step 6 (status). Tell the user the PR is already merged —
   no sync needed. Suggest `git checkout <default-branch> && git pull` to get
   back on the default branch.
-- **CLOSED**: skip to Step 5. Tell the user the PR is closed.
+- **CLOSED**: skip to Step 6. Tell the user the PR is closed.
 - **No PR found**: tell the user no PR exists for this branch and suggest `/pr`.
 
 This guard prevents accidentally merging main into a branch whose PR has already

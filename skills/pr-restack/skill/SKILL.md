@@ -126,11 +126,11 @@ re-confirming with the user.
 
 ### 3b. Determine the rebase target
 
-- Bottom branch (base = default branch): target is `origin/<default-branch>`.
-- Other branches: target is `origin/<previous-branch-in-stack>`.
+- Bottom branch (base = default branch): `<target>` is the default branch.
+- Other branches: `<target>` is the previous branch in the stack.
 
-Always rebase onto the **origin/** ref, not the local copy, so the just-pushed
-parent in step 3e is the source of truth.
+Always rebase onto the **`origin/<target>`** ref (as written in 3c/3d), not the
+local copy, so the just-pushed parent in step 3e is the source of truth.
 
 ### 3c. Run the rebase
 

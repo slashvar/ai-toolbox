@@ -40,7 +40,7 @@ golangci-lint --version   # confirm
 does not auto-update. One-liner that always pulls whatever the workflow says today:
 
 ```bash
-v=$(grep -rhA2 "golangci-lint-action" .github/workflows/ | sed -n 's/.*version: //p' | tr -d ' ' | head -1)
+v=$(grep -rhA2 "golangci-lint-action" .github/workflows/ | sed -n 's/.*version: //p' | tr -d ' "' | head -1)
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@"$v"
 ```
 
