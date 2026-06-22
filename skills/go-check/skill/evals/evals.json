@@ -1,0 +1,23 @@
+{
+  "skill_name": "go-check",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just added a new function to pkg/search/client.go. Can you verify everything still passes?",
+      "expected_output": "Claude runs golangci-lint, then go test, scoped to the affected package. Reports results of each step. If anything fails, diagnoses and fixes before re-running from lint.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "do the tests pass for the ./internal/cache package?",
+      "expected_output": "Claude runs the pipeline (lint → test) targeting the internal/cache package directory. Uses go test ./internal/cache/... Reports clearly whether tests pass.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I fixed a bug, run a quick check before I commit",
+      "expected_output": "Claude runs lint and tests scoped to the current working directory or the touched package (not ./...). Reports results.",
+      "files": []
+    }
+  ]
+}
