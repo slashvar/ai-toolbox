@@ -1,0 +1,43 @@
+{
+  "skill_name": "techdoc",
+  "evals": [
+    {
+      "id": 0,
+      "name": "review-bloated-doc",
+      "prompt": "Review and rewrite the technical doc at /Users/marwan.burelle/code/ai-toolbox/skills/techdoc/skill/evals/fixtures/bloated-retry-doc.md. Apply the techdoc style rules. Save the rewrite to OUTPUT_DIR/bloated-retry-doc.md (OUTPUT_DIR is provided as an absolute path) and write OUTPUT_DIR/CHANGELOG.md listing what you changed.",
+      "files": ["/Users/marwan.burelle/code/ai-toolbox/skills/techdoc/skill/evals/fixtures/bloated-retry-doc.md"],
+      "assertions": [
+        "Title shortened (no 'How ... Is Handled In The' phrasing)",
+        "Audience and Tech level preamble removed",
+        "Overview boilerplate ('In this section we will', 'It should be noted') removed",
+        "Options rewritten as a Markdown table with aligned separators",
+        "Passive voice ('will be retried by the client') converted to active",
+        "No fabricated defaults — unknown values are asked for or left as placeholders, not invented"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "review-lone-subsection",
+      "prompt": "Review and rewrite the technical doc at /Users/marwan.burelle/code/ai-toolbox/skills/techdoc/skill/evals/fixtures/lone-subsection-doc.md. Apply the techdoc style rules. Save the rewrite to OUTPUT_DIR/lone-subsection-doc.md and write OUTPUT_DIR/CHANGELOG.md.",
+      "files": ["/Users/marwan.burelle/code/ai-toolbox/skills/techdoc/skill/evals/fixtures/lone-subsection-doc.md"],
+      "assertions": [
+        "No heading deeper than level 3 (### is the deepest) — the #### 'Edge cases' is flattened",
+        "No lone subsection: the single '### TTL' under '## Settings' is collapsed rather than left alone",
+        "Content meaning preserved (TTL semantics, zero-TTL behavior)"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "generate-from-notes",
+      "prompt": "Generate a technical doc from the raw notes at /Users/marwan.burelle/code/ai-toolbox/skills/techdoc/skill/evals/fixtures/generate-notes.md. Apply the techdoc style rules. Save the doc to OUTPUT_DIR/deploy-cli.md.",
+      "files": ["/Users/marwan.burelle/code/ai-toolbox/skills/techdoc/skill/evals/fixtures/generate-notes.md"],
+      "assertions": [
+        "Flags/options rendered as a table with aligned separators",
+        "Exit codes rendered as a table or list",
+        "Only facts from the notes are used — nothing fabricated",
+        "No audience/purpose boilerplate",
+        "Sections no deeper than level 3, short titles"
+      ]
+    }
+  ]
+}
