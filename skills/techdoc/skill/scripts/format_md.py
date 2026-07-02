@@ -45,17 +45,18 @@ def align_block(block):
     rows = [split_cells(l) for l in block]
     ncol = max(len(r) for r in rows)
     rows = [r + [""] * (ncol - len(r)) for r in rows]
+    seps = [is_sep(r) for r in rows]
 
     widths = [0] * ncol
-    for r in rows:
-        if is_sep(r):
+    for r, sep in zip(rows, seps):
+        if sep:
             continue
         for k, c in enumerate(r):
             widths[k] = max(widths[k], len(c))
 
     out = []
-    for r in rows:
-        if is_sep(r):
+    for r, sep in zip(rows, seps):
+        if sep:
             out.append(
                 "|" + "|".join("-" * (widths[k] + 2) for k in range(ncol)) + "|"
             )
@@ -66,8 +67,7 @@ def align_block(block):
     return out
 
 
-def format_text(text):
-    lines = text.split("\n")
+def format_lines(lines):
     out = []
     i = 0
     while i < len(lines):
@@ -80,16 +80,21 @@ def format_text(text):
         else:
             out.append(lines[i].rstrip())
             i += 1
-    return "\n".join(out)
+    return out
+
+
+def format_text(text):
+    return "\n".join(format_lines(text.split("\n")))
 
 
 def find_issues(text):
     """Return a list of human-readable hygiene problems (check mode)."""
     issues = []
-    if format_text(text) != text:
+    lines = text.split("\n")
+    if format_lines(lines) != lines:
         issues.append("tables not aligned or trailing whitespace present")
     in_fence = False
-    for n, line in enumerate(text.split("\n"), 1):
+    for n, line in enumerate(lines, 1):
         stripped = line.strip()
         if stripped.startswith("```"):
             if not in_fence and stripped == "```":
