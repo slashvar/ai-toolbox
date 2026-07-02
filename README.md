@@ -15,6 +15,7 @@ Each subdirectory under `skills/` is self-contained: it ships an installable `sk
 | [`pr-restack`](skills/pr-restack/) | Re-align a chain of DRAFT PRs by chain-rebasing each branch onto its parent and force-push-with-lease. The rebase counterpart to `pr-sync`. |
 | [`pr-self-review`](skills/pr-self-review/) | Cold-read self-review of an opened PR — a context-suppressed subagent reviews the diff, you triage findings in bulk, accepted fixes land as one commit. Auto-detects the stack (Go, Rust, JS/TS, Python, Java, Ruby) for idiom-aware review. |
 | [`pr-sync`](skills/pr-sync/) | Keep a PR branch up to date with the default branch using merge (never rebase) to avoid force-pushes, with CI-status guards. The merge counterpart to `pr-restack`. |
+| [`techdoc`](skills/techdoc/) | Write or clean up technical documentation against one rule set — concise prose (distilled Strunk), tables over paragraphs, depth-3 sections, short titles, no boilerplate, readable raw Markdown. |
 
 ## Layout convention
 
