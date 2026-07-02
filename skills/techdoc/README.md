@@ -39,7 +39,7 @@ untouched.
 
 ## Layout
 
-```
+```text
 techdoc/
 ├── README.md              # this file
 ├── install.sh             # symlinks skill/ into ~/.claude/skills/techdoc
@@ -48,9 +48,11 @@ techdoc/
 └── skill/
     ├── SKILL.md            # entry point loaded by Claude Code
     ├── STYLE_RULES.md      # the rule set, read on every run
+    ├── scripts/           # format_md.py — mechanical Markdown hygiene
     └── evals/              # before/after fixtures + evals.json
 ```
 
 ## Requirements
 
-None. Zero external dependencies by design, so the skill stays portable.
+`python3` (standard library only) for the bundled Markdown formatter. No
+third-party dependencies, so the skill stays portable.

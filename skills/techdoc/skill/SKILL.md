@@ -13,22 +13,23 @@ checklist. Do not work from memory of the rules.
 
 ## Which mode
 
-| Signal | Mode |
-|--------|------|
-| User supplies an existing doc / points at a file | Review/rewrite |
-| User supplies an outline, notes, spec, or code to document | Generate |
+| Signal                                                     | Mode           |
+|------------------------------------------------------------|----------------|
+| User supplies an existing doc / points at a file           | Review/rewrite |
+| User supplies an outline, notes, spec, or code to document | Generate       |
 
 ## Review/rewrite mode
 
 1. Read the target doc.
 2. Apply every rule in `STYLE_RULES.md`.
-3. Output the rewritten doc.
-4. Append a **terse changelog** — what changed and where, one line per class of
+3. Write the rewritten doc.
+4. **Run the hygiene formatter** (see below) — never hand-align tables.
+5. Append a **terse changelog** — what changed and where, one line per class of
    fix. Follow the style rules in the changelog too (no periphrase).
 
 Changelog example:
 
-```
+```text
 Changes
 - §2 intro: cut 38 words, active voice
 - §3: 4-item list → table
@@ -46,7 +47,28 @@ technical meaning, flag it instead of guessing.
    ask for the key points.
 2. Structure first: sections (max depth 3), tables/lists for sets of items.
 3. Write prose against the rules.
-4. No changelog needed; the doc is new.
+4. **Run the hygiene formatter** (see below).
+5. No changelog needed; the doc is new.
+
+## Markdown hygiene (mechanical)
+
+The alignment and whitespace rules are deterministic — do not hand-apply them,
+you will get column widths wrong. After writing any doc to a file, run the
+bundled formatter:
+
+```bash
+python3 scripts/format_md.py <file>        # aligns tables, strips trailing whitespace
+```
+
+Then **verify** — this catches what the formatter only reports, never rewrites:
+
+```bash
+python3 scripts/format_md.py --check <file>   # exits non-zero on remaining issues
+```
+
+Resolve every reported issue before returning. A "code fence has no language"
+report means: add a language, using `text` for plain output, trees, or
+changelogs. Re-run `--check` until it is clean.
 
 ## Control hints
 
