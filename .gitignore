@@ -1,6 +1,10 @@
 .DS_Store
 .claude/settings.local.json
 
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # Exercise build artifacts
 skills/corner-cases/research/exercises/**/test_btree
 skills/corner-cases/research/exercises/**/test_list
