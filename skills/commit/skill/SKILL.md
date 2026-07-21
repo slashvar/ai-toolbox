@@ -24,6 +24,20 @@ If the user specified files, stage only those. Otherwise, review `git status` an
 
 Prefer `git add <specific-files>` over `git add -A` or `git add .`.
 
+**If you just ran `git reset --soft` (e.g. to squash commits), re-stage first.**
+A soft reset moves `HEAD` but leaves the index holding the *stale* pre-reset
+snapshot, so any working-tree edits you made after the reset are NOT in the
+index. Committing now captures the old content. The tell is `AM` (or `MM`) in
+`git status` for a file — staged copy differs from the working tree. Re-`git
+add` the affected files, then verify the staged tree matches the working tree
+before committing:
+
+```bash
+git add <files>
+git diff --cached --stat        # what will be committed
+git diff HEAD -- <files>        # should be empty once everything is staged
+```
+
 ## Step 3 — Commit
 
 **If tip is NOT on origin (amend is safe):**

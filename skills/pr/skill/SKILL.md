@@ -54,6 +54,35 @@ Check the current branch name. If it doesn't match the chosen pattern, rename it
 git branch -m <old-name> <owner>/<type>/<scope>/<short-description>
 ```
 
+### Verify the branch forks from the intended base
+
+Before going further, confirm this branch was actually cut from the right base.
+With multiple terminals or sessions open, `HEAD` can shift silently, so a branch
+created "off main" can inherit another feature branch as its base — the PR then
+carries commits that don't belong to it and shows an inflated diff.
+
+```bash
+git fetch --quiet origin
+git log --oneline origin/<default-branch>..HEAD    # commits this branch adds
+```
+
+The listed commits should be *only* the ones belonging to this change. If you
+see unrelated commits (another feature's work, someone else's commits), the
+branch was cut from the wrong base. Stop and tell the user — do not open a PR
+off the wrong base. The usual fix is to re-create the branch from the intended
+base and cherry-pick or re-apply this change:
+
+```bash
+git checkout <default-branch> && git pull
+git checkout -b <owner>/<type>/<scope>/<short-description>
+# then re-apply the change (cherry-pick the relevant commits, or rebase --onto)
+```
+
+**Exception — intentional stacked PR.** If the branch is *meant* to stack on a
+parent feature branch (see Step 6), the parent's commits appearing here is
+expected. Confirm the extra commits are exactly the parent's, not something
+unrelated.
+
 ## Step 3 — Quality gates
 
 Before committing, run the quality pipeline appropriate for the current repo.
