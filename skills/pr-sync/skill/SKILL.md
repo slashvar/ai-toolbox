@@ -44,10 +44,10 @@ gh pr view --json state --jq .state
 ```
 
 - **OPEN**: proceed to Step 3.
-- **MERGED**: skip to Step 6 (status). Tell the user the PR is already merged —
+- **MERGED**: skip to Step 7 (status). Tell the user the PR is already merged —
   no sync needed. Suggest `git checkout <default-branch> && git pull` to get
   back on the default branch.
-- **CLOSED**: skip to Step 6. Tell the user the PR is closed.
+- **CLOSED**: skip to Step 7. Tell the user the PR is closed.
 - **No PR found**: tell the user no PR exists for this branch and suggest `/pr`.
 
 This guard prevents accidentally merging main into a branch whose PR has already
@@ -60,7 +60,7 @@ git fetch origin <default-branch>
 git merge-base --is-ancestor origin/<default-branch> HEAD && echo "UP_TO_DATE" || echo "NEEDS_MERGE"
 ```
 
-If `UP_TO_DATE`: skip to Step 6 (status check). Tell the user the branch is
+If `UP_TO_DATE`: skip to Step 7 (status check). Tell the user the branch is
 already up to date with `origin/<default-branch>`.
 
 ## Step 4 — Surface CI status before merging
@@ -95,7 +95,7 @@ require a force-push. Merge preserves the existing commit history.
 git merge origin/<default-branch> --no-edit
 ```
 
-**If the merge succeeds**: verify it still builds before pushing (Step 5a),
+**If the merge succeeds**: verify it still builds before pushing (Step 6),
 then push.
 
 **If there are merge conflicts**: stop. Show the user:
@@ -106,7 +106,7 @@ then push.
 Do NOT attempt to auto-resolve conflicts. Do NOT run `git merge --abort`
 unless the user asks — they may want to resolve in place.
 
-## Step 5a — Verify the merge result builds, then push
+## Step 6 — Verify the merge result builds, then push
 
 A clean merge does NOT mean the code compiles. If the default branch changed a
 function signature, renamed a symbol, or moved a package, `git merge` reports
@@ -140,9 +140,8 @@ verification ran.
 - **Build fails**: stop. Show the error. The merge is on the local branch but
   NOT yet pushed — the user fixes the break on this branch, commits, and pushes
   (or re-runs `/pr-sync`, which is now up to date and skips to the status check).
-  Do not push a branch that compiled before the merge but not after.
 
-## Step 6 — Show PR status
+## Step 7 — Show PR status
 
 Find the PR for the current branch and display its status:
 
