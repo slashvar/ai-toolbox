@@ -104,6 +104,15 @@ prefer them once you've confirmed what they actually run.
 | `unused` | Remove the dead identifier |
 | `FAIL` + diff | Logic regression — re-read the test expectation |
 | `build failed` before tests | Compilation error; fix first |
+| `connection refused` / missing `*_URL` env / dial errors | Infra-dependent test (DB, cache, broker) with no backing service — **not a code regression**; see below |
+
+**Infra-dependent test failures are not your diff's fault.** Tests that need a
+live service (DB, cache, broker) fail with connection errors — `dial tcp ...
+connection refused`, an unset `POSTGRES_URL`/`REDIS_URL` — when that service
+isn't running locally, regardless of your change. Don't "fix" them and don't
+treat them as a gate. Skip them by default (`go test -short`, or the repo's
+build tag) and rely on CI, which provisions the infra. Only investigate if your
+change touched that integration path.
 
 Never edit generated files (`proto/gen/`, `*_gen.go`, `mock_*.go`). Fix the
 generator source instead.
