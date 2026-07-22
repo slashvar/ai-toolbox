@@ -213,3 +213,284 @@ func (m *merger) mergeFilters(value string, fromURL bool) error {
 ```
 
 **Key insight**: generics let each caller show only what's unique (field name + accumulation), with the pipeline extracted once. The variation becomes explicit and the boilerplate disappears.
+
+---
+
+# Additional examples (mined from real project history)
+
+Later additions from real refactors across several projects, not the original 7 exercises. Same calibration purpose; each is verified against the source it came from.
+
+---
+
+## Principle C — essential vs redundant branches in one domain (float comparison)
+
+From an IEEE-754 float-comparison library (C++, but the logic is portable to any IEEE language). Every comparison function carries special-case branches; the discipline is telling the **essential** ones from the **redundant** ones — both *look* like corner cases.
+
+### Essential — keep (removing them breaks IEEE-754)
+
+```cpp
+// absolute & relative: matches ±Inf, because fabs(Inf - Inf) = NaN and NaN <= tol is false.
+if (a == b) return true;
+
+// relative only: scale = max(|a|,|b|) = Inf for any Inf input, and Inf*tol = Inf,
+// so the general formula would spuriously match +Inf vs 1.0.
+if (std::isinf(a) || std::isinf(b)) return false;
+
+// ULPs: two NaN bit patterns can be adjacent as integers; arithmetic can't yield NaN here.
+if (std::isnan(a) || std::isnan(b)) return false;
+
+// ULPs: sign-magnitude integer distance is bogus across the sign boundary; the
+// `return a == b` folds ±0 (signbits differ, values equal) into the same branch.
+if (std::signbit(a) != std::signbit(b)) return a == b;
+```
+
+### Redundant — do NOT add (the general path already handles them)
+
+- Explicit `isnan` in the absolute/relative compare — `NaN <= tol` is already false, so NaN falls through and fails the tolerance check.
+- Explicit ±0 check anywhere — `+0 == -0` is already true.
+- A separate "exact match" branch — that is just `a == b`.
+
+**Key insight**: don't judge a guard by its syntax — check what the general path does with the values it screens. The `isinf`/`isnan`/`signbit` guards each defend against a value *class* the general formula provably mishandles (Inf arithmetic, NaN integer adjacency, cross-sign integer distance): essential, Principle C. The NaN/±0/exact-match guards defend against nothing IEEE arithmetic doesn't already reject, so adding them is corner-case programming — that's the #1 "general case already handles it" test. Same syntax, opposite verdicts.
+
+---
+
+## Pattern #1 — redundant vs essential boundary guard, same guard opposite verdict (graph diameter)
+
+Two functions in a graph library each open with the *identical* guard `if (order == 0) ...`; neither modifies state, so both are #1 boundary guards (not #3 preconditions) — yet only one is removable.
+
+```cpp
+// full_diameter run(): the zero-vertex case already flows correctly through the
+// general code (empty candidate loop → max_ecc stays 0 → returns diameter 0).
+// This early return is a fast-path/clarity choice, not required for correctness.
+const auto order = graph.order();
+if (order == 0) {
+    return { .diameter = 0, .radius = 0, .bfs_runs = 0, .connected = true };
+}
+```
+
+```cpp
+// cut-points: the body sizes vectors to `order` and unconditionally indexes
+// vertex 0 (root = 0). With order == 0, prefix[0] / discovered[root] is
+// out-of-bounds UB. Here the same-shaped guard is ESSENTIAL.
+const auto order = graph.order();
+if (order == 0) {
+    return;
+}
+std::vector<char>        discovered(order, 0);   // zero-length
+std::vector<std::size_t> prefix(order);          // prefix[0] would be UB
+```
+
+**Key insight**: #1's test for a boundary guard is *substituting the boundary value through the general path*, not matching the guard's shape. Do that here and the two diverge: `full_diameter`'s general path returns the right answer unaided (guard removable), while `cut-points`' general path indexes `prefix[0]` on an empty graph → UB. Same syntax, opposite verdict — the second is an essential boundary guard (Principle C), and it modifies nothing, so it is *not* a #3 precondition prologue.
+
+---
+
+## Pattern #9 — make the illegal state unrepresentable (Go type system)
+
+A generic Go utility. This is #9 by its *fix*, not its classic smell: the runtime guard below is a live precondition check (not dead "should-not-happen" code), and the fix is to make the illegal input impossible to express.
+
+### Before (runtime `reflect` guard)
+
+```go
+func UnmarshalOtherFields(data []byte, val any, otherFields *map[string]any) error {
+    ptr := reflect.ValueOf(val)
+    if ptr.Kind() != reflect.Ptr || ptr.Elem().Kind() != reflect.Struct {
+        return errors.New("expected a pointer to struct")
+    }
+    ...
+```
+
+### After (`*T` makes the pointer a compile-time guarantee)
+
+```go
+func UnmarshalOtherFields[T any](data []byte, val *T, otherFields *map[string]any) error {
+    ptr := reflect.ValueOf(val)
+    if ptr.Elem().Kind() != reflect.Struct {   // the != reflect.Ptr check is gone
+        return errors.New("expected a pointer to struct")
+    }
+    ...
+```
+
+**Key insight**: `val any` → `val *T` turns the runtime `!= reflect.Ptr` check into a compile-time guarantee, so that branch goes. (The `!= reflect.Struct` check stays — `*T` doesn't force `T` to be a struct.) It's #9's "repair the contract upstream," where the upstream is the *signature* itself — contrast the spanner `parent()` example, an upstream *algorithm* change.
+
+---
+
+## Pattern #7 — one generic erases a family of typed copies (Go)
+
+### Before (per-type near-duplicates)
+
+```go
+func MinDuration(a, b time.Duration) time.Duration { if a < b { return a }; return b }
+func MaxDuration(a, b time.Duration) time.Duration { if a < b { return b }; return a }
+// plus MinInt / MinInt64 / ... elsewhere — the same body, once per type
+```
+
+### After (one generic over any ordered type; `Max` mirrors it)
+
+```go
+func Min[T cmp.Ordered](head T, tail ...T) T {
+    res := head
+    for _, x := range tail {
+        if x < res { res = x }
+    }
+    return res
+}
+// Max is identical with `x > res`.
+```
+
+**Key insight**: each typed Min/Max is one algorithm specialized to a type — textbook #7, and the simplest form of it (contrast the callback-parameterized `mergeTyped` example above, where the *variation itself* also had to be abstracted). The sharper lesson is the coda: Go 1.21+ makes even this generic redundant with the builtin `min`/`max` — the general case sometimes migrates all the way into the language.
+
+---
+
+## Pattern #8 — optional callback replaces a duplicated overload (spanner)
+
+Distinct from the wspd/graph *constructor* example (#8) earlier in this file — this is the `findpairs` recursion.
+
+### Before (two near-identical recursive overloads; one fires an edge callback)
+
+```cpp
+void findpairs(box b1, box b2) {
+    if (well_separated(b1, b2)) { addpair(b1, b2); return; }
+    // ... recurse ...
+}
+void findpairs(box b1, box b2, std::function<void(box, box)>& edge) {
+    if (well_separated(b1, b2)) { addpair(b1, b2); edge(b1, b2); return; }
+    // ... recurse (duplicated body) ...
+}
+```
+
+### After (one function, defaulted-null callable)
+
+```cpp
+void findpairs(box b1, box b2, std::function<void(box, box)> edge = nullptr) {
+    if (well_separated(b1, b2)) {
+        addpair(b1, b2);
+        if (edge) edge(b1, b2);
+        return;
+    }
+    // ... recurse (single copy) ...
+}
+```
+
+**Key insight**: the overloads differed only by "also fire a callback." A default-null callable plus one `if (edge)` guard replaces the duplicated recursion body — the optional feature becomes an optional parameter, not a second function.
+
+---
+
+## Pattern #6 — cache the postcondition at the transform site (spanner)
+
+### Before (every call re-scans the fixed `sizes` array, O(d))
+
+```cpp
+size_t maxd() {
+    size_t m = 0;
+    for (size_t i = 1; i < sizes.size(); i++)
+        if (sizes[i] > sizes[m]) m = i;
+    return m;
+}
+```
+
+### After (compute once when the box geometry is finalized, then read)
+
+```cpp
+void update_max_dim() {
+    max_dim = 0;
+    for (size_t i = 1; i < sizes.size(); i++)
+        if (sizes[i] > sizes[max_dim]) max_dim = i;
+}
+size_t maxd() { return max_dim; }
+```
+
+**Key insight**: the largest dimension is fixed once a box's `sizes` are set — a postcondition of the geometry update. Re-deriving it on every access is the re-scan smell (#6); compute it at the one transformation site and store it.
+
+---
+
+## Pattern #7 — lift the varying input into a producer (grammar)
+
+Transform-to-unify applies to grammars as much as to functions. From a Bison parser.
+
+### Before (two statement rules with near-identical actions, differing only in the RHS nonterminal)
+
+```
+tuple_assign_stmt
+    : name_list '=' tuple_expr ';'  { /* build node */ }
+    | name_list '=' expr       ';'  { /* SAME body, $3 is a plain expr */ }
+```
+
+### After (a `tuple_rhs` producer absorbs the variation; one rule, one body)
+
+```
+tuple_rhs
+    : expr       { $$ = $1; }
+    | tuple_expr { $$ = $1; }
+    ;
+tuple_assign_stmt
+    : lvalue_list '=' tuple_rhs ';'  { /* one body */ }
+```
+
+**Key insight**: the two rules differed only in the *shape of the RHS input*. Lifting that difference into a `tuple_rhs` nonterminal collapses the duplicated action into one path. (The same change generalized `name_list` → `lvalue_list`, replacing identifier-only LHS with general expressions.)
+
+---
+
+## Pattern #6 — a tracking flag replaced by better-chosen state (ring buffer)
+
+A fixed-size ring buffer reporting a ratio between its oldest and newest sample. The first cut tracked a write cursor plus a `filled bool` ("has the buffer wrapped yet?") — and reading the oldest element then needed a three-way branch.
+
+### Before (write cursor + `filled` flag)
+
+```go
+type ratioWindow struct {
+    samples []counterSample
+    next    int  // next write position
+    filled  bool // buffer has wrapped at least once
+}
+
+func (w *ratioWindow) push(errors, total int64) float64 {
+    newest := counterSample{errors, total}
+    w.samples[w.next] = newest
+    w.next = (w.next + 1) % len(w.samples)
+    if w.next == 0 {            // extra branch, only to maintain the flag
+        w.filled = true
+    }
+    oldest, ok := w.oldest()
+    if !ok {
+        return 0
+    }
+    return ratio(oldest, newest)
+}
+
+func (w *ratioWindow) oldest() (counterSample, bool) {
+    if w.filled {               // three-way branch to locate the oldest sample
+        return w.samples[w.next], true
+    }
+    if w.next >= 2 {
+        return w.samples[0], true
+    }
+    return counterSample{}, false
+}
+```
+
+### After (oldest index + count; the flag and the whole `oldest()` helper vanish)
+
+```go
+type ratioWindow struct {
+    samples []counterSample
+    start   int // index of the oldest sample
+    count   int // number of samples held (<= len(samples))
+}
+
+func (w *ratioWindow) push(errors, total int64) float64 {
+    n := len(w.samples)
+    newest := counterSample{errors, total}
+    w.samples[(w.start+w.count)%n] = newest
+    if w.count < n {
+        w.count++
+    } else {
+        w.start = (w.start + 1) % n
+    }
+    if w.count < 2 {            // no interval spanned yet
+        return 0
+    }
+    return ratio(w.samples[w.start], newest)
+}
+```
+
+**Key insight**: `filled` was stored only to drive later control flow — the tracking-flag smell (#6). Choosing `count` over a bare cursor makes "full", "spans an interval", and the oldest index all *derivable*, so the flag, its maintenance `if`, and the whole three-way `oldest()` helper vanish. (Compare `maxd()` above: that #6 fix *caches* a postcondition; this one *picks state* so there's nothing to reconstruct.)
