@@ -5,7 +5,8 @@ description: Safe git commit helper that enforces a push-safety rule: never amen
 
 # commit
 
-Safe git commit skill. The core rule: **if the tip commit is already on origin, create a new commit. If it hasn't been pushed yet, amending is fine.**
+The rule: **if the tip commit is on origin, make a new commit. If it is not,
+amending is fine.**
 
 ## Step 1 — Check remote state
 
@@ -14,38 +15,36 @@ git fetch --quiet
 git branch -r --contains HEAD
 ```
 
-If the output is non-empty (the tip commit appears on any remote branch), the commit has been pushed — **do not amend, create a new commit**.
-
-If the output is empty, the tip hasn't been pushed yet — **amending is allowed**.
+Any output means the tip is pushed: **do not amend**. No output means it is
+unpushed: amending is allowed.
 
 ## Step 2 — Stage files
 
-If the user specified files, stage only those. Otherwise, review `git status` and stage the files that are clearly part of the change being committed. Avoid staging unrelated files or files that look like they could contain secrets.
+Stage what the user named. Otherwise read `git status` and stage the files that
+clearly belong to the change. Skip unrelated files and anything that could hold
+secrets. Prefer `git add <files>` over `git add -A` or `git add .`.
 
-Prefer `git add <specific-files>` over `git add -A` or `git add .`.
-
-**If you just ran `git reset --soft` (e.g. to squash commits), re-stage first.**
-A soft reset moves `HEAD` but leaves the index holding the *stale* pre-reset
-snapshot, so working-tree edits made after the reset aren't staged. The tell is
-`AM` (or `MM`) in `git status` — the staged copy differs from the working tree.
-Re-`git add` the affected files, then confirm nothing is left unstaged before
-committing:
+**After `git reset --soft`** (e.g. to squash), re-stage first. A soft reset moves
+`HEAD` but leaves the index at the stale pre-reset snapshot, so later edits are
+not staged. The tell is `AM` or `MM` in `git status`. Re-add, then confirm nothing
+is left unstaged:
 
 ```bash
 git add <files>
-git diff --stat -- <files>   # should be empty once everything is staged
+git diff --stat -- <files>   # empty once everything is staged
 ```
 
 ## Step 3 — Commit
 
-**If tip is NOT on origin (amend is safe):**
-```bash
-git commit --amend --no-edit
-# or, if a new message is appropriate:
-git commit --amend -m "..."
-```
+Message: lead with the type (`feat`, `fix`, `refactor`, `chore`, `test`, `docs`)
+and scope; one short imperative sentence saying *what* and *why*; match
+`git log --oneline -10`.
 
-**If tip IS on origin (must not amend):**
+| Tip state | Command                                                                  |
+|-----------|--------------------------------------------------------------------------|
+| Unpushed  | `git commit --amend --no-edit` (or `--amend -m "..."` for a new message) |
+| On origin | New commit, as below                                                     |
+
 ```bash
 git commit -m "$(cat <<'EOF'
 <message>
@@ -55,23 +54,14 @@ EOF
 )"
 ```
 
-For the commit message:
-- Lead with the type (`feat`, `fix`, `refactor`, `chore`, `test`, `docs`) and scope
-- One short imperative sentence describing *what* changed and *why*
-- Follow the style of recent commits in the repo (`git log --oneline -10`)
-
 ## Step 4 — Sanity check
 
-After committing, run a quick check scoped to the affected package(s). Pick the
-strategy that matches the repo:
+Run a quick check scoped to the affected packages, then report the result. If
+tests fail, say so; do not proceed silently.
 
-- **A project-specific check skill is installed** (e.g. a `go-check` or
-  language/repo quality-pipeline skill): prefer it — it knows the repo's exact
-  lint/test invocation and CI parity.
-- **Go project** (`go.mod` or `*.go` files): `golangci-lint run ./...` then
-  `go test ./...`, scoped to the affected directory.
-- **Other languages**: run the project's standard test command if obvious from
-  `Makefile`, `package.json`, `Cargo.toml`, `pyproject.toml`, etc.
-- **No test infrastructure visible**: skip and note it.
-
-Report the result. If tests fail, say so — don't silently proceed.
+| Repo                                               | Check                                                                                                   |
+|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| A stack check skill is installed (e.g. `go-check`) | Use it; it knows the exact lint/test invocation and CI parity.                                          |
+| Go (`go.mod`)                                      | `golangci-lint run` and `go test` on the changed packages.                                              |
+| Other                                              | The project's standard test command, from `Makefile`, `package.json`, `Cargo.toml`, `pyproject.toml`, … |
+| No test infrastructure                             | Skip and say so.                                                                                        |
