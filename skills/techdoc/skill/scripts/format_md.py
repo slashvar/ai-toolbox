@@ -19,6 +19,7 @@ import re
 import sys
 
 SEP_CELL = re.compile(r":?-+:?")
+UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
@@ -30,9 +31,9 @@ def split_cells(line):
     s = line.strip()
     if s.startswith("|"):
         s = s[1:]
-    if s.endswith("|"):
+    if s.endswith("|") and not s.endswith("\\|"):
         s = s[:-1]
-    return [c.strip() for c in s.split("|")]
+    return [c.strip() for c in UNESCAPED_PIPE.split(s)]
 
 
 def is_sep(cells):

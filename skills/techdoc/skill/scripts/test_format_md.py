@@ -33,6 +33,12 @@ class FormatTest(unittest.TestCase):
     def test_closing_fence_not_flagged(self):
         self.assertEqual(find_issues("```text\nx\n```\n"), [])
 
+    def test_escaped_pipe_stays_in_cell(self):
+        table = "| a | b |\n|---|---|\n| x\\|y | z |"
+        want = "| a    | b |\n|------|---|\n| x\\|y | z |"
+        self.assertEqual(format_text(table), want)
+        self.assertEqual(format_text(want), want)
+
 
 if __name__ == "__main__":
     unittest.main()
