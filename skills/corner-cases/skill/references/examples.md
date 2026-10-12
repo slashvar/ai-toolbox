@@ -1,6 +1,6 @@
 # Examples: Before/After Snippets
 
-Concrete illustrations from the 7 exercises that produced this catalog. Use these to calibrate what "good" looks like when applying the patterns.
+Concrete illustrations from the exercises and real refactors that produced this catalog. Use these to calibrate what "good" looks like when applying the patterns.
 
 ---
 
