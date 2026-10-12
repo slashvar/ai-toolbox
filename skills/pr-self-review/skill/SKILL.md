@@ -5,311 +5,220 @@ description: Cold-read self-review of a pull request — spawn a subagent that h
 
 # pr-self-review
 
-Two-phase skill: a cold-read review pass against an opened PR, followed by a
-bulk-triage-then-batch-apply fix pass. The reviewer is a subagent with **no
-visibility into the project's design conversation, plan files, or
-project-scoped memory** — by construction. The goal is to catch the
-assumptions and missing context that *you* won't catch precisely because you
-designed the change.
+A cold-read review of an opened PR, then a bulk-triage-then-batch-apply fix
+pass. The reviewer is a subagent with **no visibility into the design
+conversation, plan files, or project-scoped memory**. It catches the
+assumptions and missing context that you miss because you designed the change.
 
-The skill is **language- and org-agnostic**. It auto-detects the project's
-stack (Step 2) and loads a matching review profile so the reviewer applies the
-right idioms and skips whatever your linter already covers. Unknown stack →
-generic review, no failure.
+The skill is language- and org-agnostic. It detects the stack (Step 2) and
+loads a matching review profile; an unknown stack gets the generic review.
 
-This skill is **distinct from**:
+It is distinct from:
 
-- **A heavy multi-agent review** (security, performance, etc.) — if your setup
-  has one, use it as the final gate before flipping a PR ready, not as the
-  day-to-day self-review loop.
-- **A working-tree review** — that reviews uncommitted changes pre-commit.
-  `pr-self-review` operates on an opened PR, including its title/body.
+- **A heavy multi-agent review** (security, performance, …): use it as the
+  final gate before marking a PR ready, not as the day-to-day loop.
+- **A working-tree review**: that covers uncommitted changes. This skill covers
+  an opened PR, including its title and body.
 
----
+## Conventions
 
-## Step 1 — Identify the PR and check preconditions
+**Scratch root.** `SCRATCH="${TMPDIR:-/tmp}"`. If the user's configuration
+names another scratch directory, use that instead. Every temp path below hangs
+off `$SCRATCH`.
 
-Argument shape: `/pr-self-review` (uses current branch) OR `/pr-self-review <pr-number>`.
+**Rules for reviewer findings.** These apply at every step below.
 
-```bash
-# If a PR number was passed, switch to that branch first.
-if [ -n "$PR_NUM" ]; then
-  gh pr checkout "$PR_NUM"
-else
-  PR_NUM=$(gh pr view --json number --jq .number 2>/dev/null || true)
-fi
+| Rule                 | Detail                                                                                                                                                                                                                                                 |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Settled decisions    | List them in the brief as "do NOT re-propose": choices the user already made, explicit human-reviewer requests, and findings skipped in an earlier pass. State outcomes only, not the design conversation.                                             |
+| Verify before triage | Check each finding against the code and tests before the user sees it. Agents misread: a "needless" helper that is used, "duplicate" test cases that differ, a logical reduction that is invalid.                                                      |
+| Premise check        | Before recommending a fix, check its premise: does the suggested helper exist and fit, and will it survive (is the PR or the codebase removing it)?                                                                                                    |
+| Human wins           | An explicit request from a human reviewer beats an agent's simplification.                                                                                                                                                                             |
+| Account for skips    | Every skipped finding, including those dropped by verification, gets a one-line reason.                                                                                                                                                                |
+| Repo policy          | If the repo forbids AI-written PR descriptions or comments (check `CONTRIBUTING`, the PR template, agent-instruction files), never post a comment or run `gh pr edit`. Propose the text and let the user apply it. Findings are local-only by default. |
 
-# One metadata fetch covers preconditions, the brief, and the user summary —
-# the PR is immutable for the duration of the skill, so don't re-query per field.
-META=$(gh pr view "$PR_NUM" --json number,state,title,body,baseRefName,headRefName,isDraft,url)
-```
+## Step 1 — Identify the PR
 
-Hard pre-conditions, abort with a clear message if any fail:
+Argument: none (current branch) or `<pr-number>`.
 
-1. **PR must exist and be OPEN.** `echo "$META" | jq -r .state` must be
-   `OPEN`. Closed/merged → abort.
-2. **HEAD must equal `origin/<head-ref>`.** Otherwise the reviewer would
-   review stale state. Compare both SHAs in one call:
-   `git rev-parse HEAD "origin/$(echo "$META" | jq -r .headRefName)"`. If
-   local is ahead, suggest the user push first.
-3. **Working tree clean.** If `git status --short` is non-empty,
-   `git stash push -u` and remember to pop at the end of the skill. Don't
-   stash silently mid-loop.
-
-Surface the resolved PR (number, title, head branch, base branch, draft
-status) to the user before doing anything mutating — all of these are already
-in `$META`. Then continue.
-
-## Step 2 — Detect the stack and assemble the review profile
-
-Sniff the repo root for the first matching marker, then read the matching
-section of `references/review-profiles.md`:
-
-| Marker file | Profile |
-|---|---|
-| `go.mod` | Go |
-| `Cargo.toml` | Rust |
-| `package.json` | JavaScript / TypeScript |
-| `pyproject.toml`, `setup.py`, `requirements.txt` | Python |
-| `pom.xml`, `build.gradle` | Java / Kotlin |
-| `Gemfile` | Ruby |
-| *(none of the above)* | Generic only |
+1. **Working tree clean.** If `git status --short` is non-empty, tell the user,
+   then `git stash push -u` and pop at the end (Step 8). Never stash silently
+   mid-loop.
+2. Resolve the PR. One metadata fetch serves the checks, the brief, and the
+   summary; the PR does not change during the run.
 
 ```bash
-# Cheap detection — first match wins; fall through to generic.
-for m in go.mod Cargo.toml package.json pyproject.toml setup.py pom.xml build.gradle Gemfile; do
-  [ -f "$m" ] && { echo "marker: $m"; break; }
-done
+[ -n "$PR_NUM" ] && gh pr checkout "$PR_NUM"
+META=$(gh pr view ${PR_NUM:+"$PR_NUM"} --json number,state,title,body,baseRefName,headRefName,isDraft,url) || exit 1
+PR_NUM=$(jq -r .number <<<"$META")
+HEAD_REF=$(jq -r .headRefName <<<"$META")
+git fetch -q origin "$HEAD_REF" && git rev-parse HEAD "origin/$HEAD_REF"
 ```
 
-The profile contributes a **focus addendum** (idioms to check) and a **skip
-addendum** (what the project's linter/formatter already enforces, so the
-reviewer doesn't waste findings on it). These layer on top of the generic
-core in Step 3. If no marker matches, use the generic core alone and say so to
-the user.
+Abort with a clear message if:
 
-Detection sniffs the repo root only. In a monorepo or polyglot repo the root
-marker may not match the language the diff actually touches — if the changed
-files are clearly in a different stack than the detected profile, prefer the
-profile matching the diff (or fall back to generic) and tell the user.
+- **No PR, or state is not `OPEN`.**
+- **The two SHAs differ.** The reviewer would see stale state. If local is
+  ahead, ask the user to push first.
+
+Show the user the PR number, title, head and base branches, and draft status
+before anything mutating.
+
+## Step 2 — Detect the stack
+
+First marker found at the repo root wins. Read the matching section of
+`references/review-profiles.md`.
+
+| Marker file                                      | Profile                     |
+|--------------------------------------------------|-----------------------------|
+| `go.mod`                                         | Go                          |
+| `Cargo.toml`                                     | Rust                        |
+| `package.json`                                   | JavaScript / TypeScript     |
+| `pyproject.toml`, `setup.py`, `requirements.txt` | Python                      |
+| `pom.xml`, `build.gradle`                        | Java / Kotlin               |
+| `Gemfile`                                        | Ruby                        |
+| *(none)*                                         | Generic only; tell the user |
+
+A profile adds a **focus addendum** (idioms to check) and a **skip addendum**
+(what the project's linter already enforces). Both layer on the generic core in
+Step 3.
+
+Detection sniffs the root only. If the changed files are clearly in another
+stack (monorepo, polyglot repo), use the profile matching the diff, or generic,
+and tell the user.
 
 ## Step 3 — Run the cold-read review
 
-Capture the inputs in a self-contained brief and spawn one general-purpose
-Agent.
+**Context suppression (load-bearing).** The reviewer must not see the design
+conversation, plan or design files, or project-scoped memory or notes. It may
+use generic, cross-project conventions (style guides, language idioms). If you
+run a memory system, exclude project-scoped entries from the subagent.
 
-**Context-suppression rule (load-bearing).** The reviewer must NOT see:
-- the design conversation that produced this PR,
-- plan / design files for this change,
-- any project-scoped memory or notes specific to this codebase.
-
-The reviewer MAY use generic, cross-project coding conventions (style guides,
-language idioms). The point is a genuinely cold read: the reviewer should
-react to the diff the way someone encountering it for the first time would. If
-you run a memory system, exclude project-scoped entries from the subagent and
-allow only generic-convention ones.
+Stage the PR title, body, and diff in one file, so the agent reads a single
+artifact and no huge diff is passed inline:
 
 ```bash
-# Reuse the $META blob from Step 1; only the diff needs a fresh call.
-PR_TITLE=$(echo "$META" | jq -r .title)
-PR_BODY=$(echo "$META" | jq -r .body)
-PR_BASE=$(echo "$META" | jq -r .baseRefName)
-DIFF=$(gh pr diff "$PR_NUM" --patch)
+BRIEF="$SCRATCH/pr-self-review-input-$PR_NUM.md"
+{
+  printf '# PR #%s: %s\n\nBase: %s\n\n## Body\n\n%s\n\n## Diff\n\n' \
+    "$PR_NUM" "$(jq -r .title <<<"$META")" "$(jq -r .baseRefName <<<"$META")" "$(jq -r .body <<<"$META")"
+  gh pr diff "$PR_NUM" --patch
+} >| "$BRIEF"
 ```
 
-Stage the brief at a temp path (e.g. `${TMPDIR:-/tmp}/pr-self-review-input-<pr>.md`)
-so the Agent has a single artifact to read — this avoids token-budget blowups
-from passing huge diffs inline. The brief includes:
+Spawn one `general-purpose` Agent. Its prompt is self-contained:
 
 ```markdown
-# Inputs
+You are a senior engineer reading PR #<pr> cold. You have NOT seen the design
+conversation, plan files, or project context. Generic, cross-project coding
+conventions are fair game. Read the title, body, and diff in <BRIEF path>.
 
-- PR: #<pr> — "<title>"
-- Base: <base-ref>
-- Diff (unified, as `gh pr diff` produced it)
-- PR body (full markdown)
-
-# Reviewer instructions
-
-You are a senior engineer reading this PR cold. You have NOT seen the design
-conversation, the plan/design files, or any project-specific context. Generic,
-cross-project coding conventions are fair game.
-
-Focus on (generic core):
+Focus on:
 - Hidden assumptions and undocumented invariants
-- Test coverage gaps (especially error paths, edge cases the diff hints at)
+- Test coverage gaps (error paths, edge cases the diff hints at)
 - Naming clarity, especially for public / exported APIs
 - PR body: does it explain WHAT changed and WHY, enough to review the diff?
-- Anything that would confuse a future maintainer reading this six months from now
-
-Focus on (language profile addendum — from references/review-profiles.md):
-<paste the FOCUS addendum for the detected stack, or omit if generic>
+- Anything that would confuse a maintainer six months from now
+<FOCUS addendum for the detected stack, if any>
 
 Skip:
 - Subjective style preferences
-- Speculative refactors not justified by current code
-- Premature abstraction suggestions
+- Speculative refactors and premature abstraction
 - Commit-message critique
-- Anything the project's linter/formatter would surface (those run separately):
-<paste the SKIP addendum for the detected stack, or omit if generic>
+- Anything the project's linter or formatter surfaces:
+  <SKIP addendum for the detected stack, if any>
 
-Output: write `${TMPDIR:-/tmp}/pr-review-<pr>.md` with the structured findings
-below. Render the same content as your tool reply so it shows in the conversation.
+Settled decisions. Do NOT re-propose:
+<settled decisions, or "none">
 
-# Output schema
-
-If no findings: write a one-line file containing `_No findings._` and reply
-with the same.
-
-Otherwise, one block per finding, numbered from 1:
+Output: write <$SCRATCH/pr-review-<pr>.md> and render the same content as your
+reply. If there are no findings, write the single line `_No findings._`.
+Otherwise one block per finding, numbered from 1:
 
 ## Finding N: <one-line title>
 
 **Severity:** blocker | suggestion | nit
 **File:** <path>:<line>  (or "PR body" / "PR title")
-**Issue:** 2–3 sentences explaining the concern.
-**Suggested fix:** concrete change. Quote the new lines / new wording.
+**Issue:** 2–3 sentences.
+**Suggested fix:** concrete change; quote the new lines or wording.
 ```
 
-Agent invocation:
+Verify the file exists and is non-empty after the Agent returns. If not, treat
+it as an Agent failure and tell the user.
+
+## Step 4 — Verify and triage in bulk
+
+Render `pr-review-<pr>.md` in the conversation. If it says `_No findings._`,
+skip to Step 7 with "✓ no findings, PR looks clean."
+
+Otherwise apply the **verify** and **premise check** rules to every finding.
+Annotate each in the file with `**Check:** confirmed | wrong — <reason>`. A
+`wrong` finding is shown to the user as pre-marked `skip`.
+
+Then ask the user **once**, with the full annotated list visible:
 
 ```text
-Agent({
-  subagent_type: "general-purpose",
-  description: "Cold-read PR self-review",
-  prompt: <the brief above, fully self-contained>
-})
+fix 1,3,5      apply the suggested fix as-is
+skip 2         disagree with the reviewer
+discuss 4      talk before deciding
+edit 6         accept, but I'll dictate a different fix
 ```
 
-The brief tells the agent to write `pr-review-<pr>.md`. Verify the file exists
-after the Agent returns. If empty / missing, treat as an Agent failure and
-surface to the user.
+One round-trip; no per-finding drag. Pause for the triage even in auto mode:
+human judgment on findings from a context-free agent is the point of the skill.
 
-## Step 4 — Triage in bulk
+## Step 5 — Finalize the apply list
 
-Read `pr-review-<pr>.md` and render it in the conversation (it's already markdown).
+Resolve each `discuss` or `edit` finding in a short exchange, then reduce every
+finding to `fix` or `skip`. Update `pr-review-<pr>.md` in place: under each
+`skip`, append `**Resolution:** skipped — <one-line reason>`. The file is the
+durable record of what the review caught and why each finding was or was not
+addressed.
 
-If the file says `_No findings._`, skip to Step 7 with the message
-"✓ no findings, PR looks clean."
+## Step 6 — Apply in a batch
 
-Otherwise, ask the user **once**, with the full list visible, to triage:
+For each `fix`, make the change (Edit for code). PR title and body changes use
+`gh pr edit`, unless the **repo policy** rule applies; then show the proposed
+text instead. Apply everything before showing the diff, and do not commit yet.
 
-```
-Triage example:
-  - fix 1,3,5 — apply the suggested fix as-is
-  - skip 2 (don't agree with the reviewer)
-  - discuss 4 (let's talk before deciding)
-  - edit 6 — accept but I'll dictate a different fix
-```
-
-Capture the user's reply. The triage is a single round-trip; don't drag
-per-finding.
-
-In auto-mode, still pause for this triage — the human judgment is the
-load-bearing decision this skill is designed around. Bypassing it makes the
-skill equivalent to auto-apply, which we explicitly chose against.
-
-## Step 5 — Discuss flagged findings, finalize the apply list
-
-For each finding marked `discuss` or `edit`, have a short back-and-forth with
-the user, then collapse it back into the apply set (`fix`) or the skip set
-(`skip`).
-
-At this step every finding is either `fix` or `skip`. Update
-`pr-review-<pr>.md` in place:
-
-- For `fix` findings: leave as-is.
-- For `skip` findings: append `**Resolution:** skipped — <one-line reason from
-  the user, if given>` under the finding.
-
-This keeps the review file as a durable record of what the self-review caught
-and why each finding was or wasn't addressed.
-
-## Step 6 — Apply fixes in a batch
-
-For each `fix` finding, make the suggested change using the appropriate tool
-(Edit for code edits, `gh pr edit` for PR body / title changes). Apply all of
-them before showing the user the diff. Do not commit yet.
-
-After the apply pass:
-
-1. Show `git status --short` (any unstaged changes the apply produced).
-2. Show `git diff` (the actual changes).
-3. Ask the user to confirm the diff looks right before committing.
-
-If any apply step fails (Edit can't find the old_string because the suggested
-fix was inaccurate, etc.), surface the failure to the user finding-by-finding —
-don't silently drop fixes.
+Then show `git status --short` and `git diff`, and ask the user to confirm.
+If an apply step fails (the suggested old text is not found, say), report it
+per finding; never drop a fix silently.
 
 ## Step 7 — Commit and push
 
 If at least one finding was applied:
 
-1. Propose a commit message: `chore(<scope>): address self-review findings`
-   where `<scope>` is inferred from the most-touched directory. Show it to the
-   user; they may accept, edit, or replace. (If the repo doesn't use
-   conventional commits, fall back to its observed style.)
-2. Commit using a HEREDOC for message safety.
-3. `git push` (no force — `pr-self-review` only operates on the existing HEAD
-   line of history).
+1. Propose `chore(<scope>): address self-review findings`, with `<scope>` the
+   most-touched directory. Follow the repo's commit style if it differs. The
+   user may edit it.
+2. Commit with a HEREDOC message.
+3. `git push`, never forced: the skill only extends the existing history.
 
-If zero findings were applied (all skipped, or no findings to begin with):
-skip the commit. Show a one-line summary of what was triaged and exit.
+Otherwise skip the commit and print a one-line triage summary that lists every
+skipped finding with its reason.
 
-## Step 8 — Offer re-review (don't force)
+## Step 8 — Offer re-review
 
-If at least one fix was committed:
+After a commit, ask: `✓ committed <sha>. Run another review pass? (y/N)`.
+Default is N. On yes:
 
-```
-✓ committed <commit-sha>. Run another review pass against the new HEAD? (y/N)
-```
+1. Archive the review:
+   `mv "$SCRATCH/pr-review-$PR_NUM.md" "$SCRATCH/pr-review-$PR_NUM.$(date +%Y%m%dT%H%M%S).md"`.
+2. Re-run from Step 2 with a fresh `$META` and brief. Add this pass's skipped
+   findings to the settled decisions.
 
-Default is N. If the user accepts:
+On no, exit. If Step 1 stashed, `git stash pop` now and say so.
 
-1. Archive the current `pr-review-<pr>.md` to
-   `pr-review-<pr>.<timestamp>.md` so history isn't lost.
-2. Loop back to Step 2 (re-detect + re-run against the fresh HEAD).
+## Design choices
 
-If no re-review: exit cleanly. If the user auto-stashed at Step 1, `git stash
-pop` now and tell them.
-
----
-
-## Decisions locked in this skill (do not relitigate)
-
-| Decision | Choice |
-|---|---|
-| Trigger | Standalone invocation, not auto-chained from a PR-creation skill |
-| Context suppression | Principle-based: design conversation, plan files, and project-scoped memory excluded; generic-convention memory allowed |
-| Stack handling | Auto-detect by marker file → load profile from `references/review-profiles.md`; generic fallback |
-| Review depth | Light single-Agent cold-read pass, not a heavy multi-agent flow |
-| Output location | `${TMPDIR:-/tmp}/pr-review-<pr>.md` (saved file + rendered to terminal) |
-| Fix interaction | Bulk triage in one round-trip, then batch apply |
-| Re-review | Offered after commit, defaults to no |
-| PR identification | Current branch by default; optional `<pr-number>` arg |
-| Review scope | Diff + PR body (no commit messages, no per-pkg meta) |
-| Reviewer persona | "Senior engineer reading cold" + detected-stack idioms + explicit skip list |
-
-## Anti-patterns this skill exists to prevent
-
-1. **Reviewing a PR using the same context that wrote it.** That misses the
-   exact class of issue an external reviewer catches — the ones that look
-   obvious *to you* and confusing to everyone else.
-2. **Auto-applying reviewer findings.** The reviewer is a fresh agent without
-   your project context, by design. Some findings will misread intent. Triage
-   is load-bearing.
-3. **Per-finding triage drag.** Showing each finding individually and asking
-   "fix or skip?" turns a 10-finding review into 10 round-trips. Bulk triage
-   stays interactive without being chatty.
-4. **Forgetting the skipped findings.** Skipped findings annotated with their
-   reason in the review file give future-you (or a real reviewer) evidence that
-   the issue was considered.
-5. **Re-running the review automatically after a fix.** The new run sees
-   different code and produces different findings; auto-loops can flip-flop or
-   burn agent calls. Offer, don't force.
-6. **Posting findings to GitHub by default.** Self-review noise on a PR you may
-   still iterate on is pollution. Local-only by default; add a `--post` flag
-   later if there's real value.
-7. **Hardcoding one language's idioms.** A Go-only skip list flags as findings
-   things that are normal in Python (and vice-versa). The profile layer keeps
-   the reviewer accurate per stack.
+| Choice                                        | Reason                                                                                          |
+|-----------------------------------------------|-------------------------------------------------------------------------------------------------|
+| Standalone, not auto-chained from PR creation | The user decides when the PR is ready for a cold read                                           |
+| One light agent, not a multi-agent flow       | Day-to-day loop; the heavy review is the final gate                                             |
+| Bulk triage, then batch apply                 | Ten findings cost one round-trip, not ten                                                       |
+| Triage never skipped                          | The reviewer lacks project context, so some findings misread intent; auto-apply would land them |
+| Re-review offered, never automatic            | A new run sees new code and finds different things; loops flip-flop and burn calls              |
+| Findings stay local                           | Self-review noise posted on a PR still in flux is pollution                                     |
+| Skips annotated with reasons                  | Future-you or a human reviewer can see the issue was considered                                 |
+| Profile layer per stack                       | One language's skip list flags normal idioms in another                                         |

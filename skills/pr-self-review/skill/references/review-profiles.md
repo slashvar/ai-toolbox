@@ -1,20 +1,17 @@
 # Review profiles
 
-Per-language addenda for the cold-read reviewer brief. The SKILL's Step 2
-detects the stack from a marker file and pastes the matching **Focus** and
-**Skip** blocks into the brief (Step 3), layered on top of the generic core.
+Per-language addenda for the cold-read reviewer brief. SKILL Step 2 detects the
+stack from a marker file; Step 3 pastes the matching **Focus** and **Skip**
+blocks into the brief, on top of the generic core.
 
-Conventions:
-- **Focus** = idioms a cold reviewer *should* check for this stack.
-- **Skip** = which tools own the no-go territory for this stack, named per the
-  shared skip rule below.
+- **Focus**: idioms a cold reviewer should check for this stack.
+- **Skip**: the tools that own the no-go territory for this stack.
 
-**Shared skip rule (every stack).** Don't raise findings for anything the
-configured toolchain already enforces — formatting, import ordering, stylistic
-lints, naming conventions, and type errors a type-checker already reports. Each
-profile's **Skip** line below just names the tools that own this territory for
-that stack; if a project pins a different toolchain, swap in the linter
-actually configured in the repo.
+**Shared skip rule (every stack).** Raise no finding for what the configured
+toolchain already enforces: formatting, import order, stylistic lints, naming
+conventions, and type errors a type-checker reports. Each **Skip** line names
+the usual tools; if the project pins a different toolchain, name the linter
+configured in the repo.
 
 ---
 
@@ -103,5 +100,5 @@ actually configured in the repo.
 
 ## Generic (no marker matched)
 
-No addendum. The reviewer uses the generic core from the SKILL only. Tell the
-user the stack wasn't detected so they know the review is language-neutral.
+No addendum: the reviewer uses the generic core only. Tell the user the stack
+was not detected, so they know the review is language-neutral.
