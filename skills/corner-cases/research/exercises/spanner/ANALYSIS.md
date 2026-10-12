@@ -2,7 +2,7 @@
 
 ## Source
 
-Real-world code from `/Users/marwan.burelle/repo/spanner_clustering/src/`. Header-only C++14 library for geometric spanner construction using WSPD with fair split trees and union-find clustering.
+Real-world code from the author's `spanner_clustering` library. Header-only C++14 library for geometric spanner construction using WSPD with fair split trees and union-find clustering.
 
 ## Baseline
 

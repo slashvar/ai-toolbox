@@ -1,5 +1,7 @@
 # Corner Case Programming — Pattern Catalog
 
+> Research snapshot (patterns #1–#9). The maintained catalog, including #10–#12, is `../skill/references/patterns.md`.
+
 ## What this is
 
 Corner case programming is an anti-pattern where code is split into too many specific sub-cases that the general case already handles. The patterns below are organized under three principles discovered across 7 exercises (linked list, B-tree insert/remove, real-world C++ and Go refactoring).
@@ -45,7 +47,7 @@ The general logic, when written correctly, handles boundaries naturally. Corner 
 
 **Example** (`btree remove`): CLRS has 3 sub-cases for "key in internal node." Instead of branching, always swap with predecessor (3 lines), then fall through to the standard descent. The descent's fattening logic handles making the child viable.
 
-**Tool mapping**: In Go, C++, Rust, etc., **generics/templates are this pattern's best tool for boilerplate unification**. Exercise 7's `mergeTyped[T any]` in the metis parse package unified four boilerplate-heavy merge functions (72 → 39 lines) while making the per-type variation explicit.
+**Tool mapping**: In Go, C++, Rust, etc., **generics/templates are this pattern's best tool for boilerplate unification**. Exercise 7's `mergeTyped[T any]` in a Go options parser unified four boilerplate-heavy merge functions (72 → 39 lines) while making the per-type variation explicit.
 
 **Distinguishable from #4 (priority chain)**: transform-to-unify has one outcome reached via all paths after a preparatory step. A priority chain has different *preconditions* but the same postcondition — the branches themselves are necessary.
 
@@ -95,7 +97,7 @@ After any operation, you know more than you think. A function's contract tells y
 
 Two tests on the same condition are only redundant if they test the same state with the same outcome. Three patterns look redundant on the surface but are essential. The **condition-test rule** from CLAUDE.md is the mechanical detector: "between two tests on the same condition, there should exist a code path modifying that condition."
 
-**Heuristic for real-world code**: a test file named `corner_cases_test.go` (or similar) typically contains **intentional contracts**, not elimination targets. The "corner cases" are guardrails for documented behavior. Before touching code that maps to such tests, verify you're not breaking the contract. (Exercise 7: metis `corner_cases_test.go` documents `aroundLatLng=""` → `[0,0]` etc. as public API.)
+**Heuristic for real-world code**: a test file named `corner_cases_test.go` (or similar) typically contains **intentional contracts**, not elimination targets. The "corner cases" are guardrails for documented behavior. Before touching code that maps to such tests, verify you're not breaking the contract. (Exercise 7: a Go package's `corner_cases_test.go` documents `aroundLatLng=""` → `[0,0]` etc. as public API.)
 
 ### 3. Precondition prologue
 
@@ -153,10 +155,10 @@ At each green step, ask: "what's the general rule that covers this test AND the 
 
 ## Connection to coding guidelines
 
-| Guideline (CLAUDE.md) | Principle | How it applies |
-|---|---|---|
-| Minimize cyclomatic complexity | A | Fewer special cases = fewer branches |
-| Minimize exit points | A | One general path instead of multiple early returns |
-| Early returns OK when they don't conflict | C (#3) | Prologues that modify state are valid early-exit patterns |
-| Condition-test rule | C | Mechanical detector for false positives |
-| Pre/post conditions and invariants | B | Use contracts directly, don't re-derive or work around |
+| Guideline (CLAUDE.md)                     | Principle | How it applies                                            |
+|-------------------------------------------|-----------|-----------------------------------------------------------|
+| Minimize cyclomatic complexity            | A         | Fewer special cases = fewer branches                      |
+| Minimize exit points                      | A         | One general path instead of multiple early returns        |
+| Early returns OK when they don't conflict | C (#3)    | Prologues that modify state are valid early-exit patterns |
+| Condition-test rule                       | C         | Mechanical detector for false positives                   |
+| Pre/post conditions and invariants        | B         | Use contracts directly, don't re-derive or work around    |
