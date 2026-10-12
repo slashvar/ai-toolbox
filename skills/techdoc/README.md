@@ -1,58 +1,45 @@
 # techdoc
 
-A Claude Code skill for **writing and cleaning up technical documentation**. It
-applies one fixed rule set: concise prose (distilled from Strunk's *Elements of
-Style*), tables and bullets over paragraphs, section depth capped at 3, short
-titles, no audience/purpose boilerplate, and Markdown source that reads cleanly
-without a renderer.
+A Claude Code skill that writes and cleans up technical documentation against
+one rule set: concise prose (distilled from Strunk's *Elements of Style*),
+tables and bullets over paragraphs, section depth capped at 3, short titles, no
+audience/purpose boilerplate, and Markdown that reads cleanly without a renderer.
 
-Two entry points, one rule set:
+| Mode           | Input                         | Output                             |
+|----------------|-------------------------------|------------------------------------|
+| Review/rewrite | An existing doc               | The rewrite plus a terse changelog |
+| Generate       | Outline, notes, spec, or code | A new doc; no facts invented       |
 
-- **Review/rewrite** an existing doc — returns the rewrite plus a terse
-  changelog of what was fixed and where.
-- **Generate** a new doc from an outline, notes, spec, or code — never
-  fabricates facts from a bare topic.
-
-It is format-agnostic (README, design doc, runbook, API reference) and
-standalone — no dependencies on other skills or external formatters.
+Format-agnostic (README, design doc, runbook, API reference) and standalone.
+Needs `python3` (standard library only) for the bundled formatter.
 
 ## Install
 
 ```sh
-./install.sh
+./install.sh     # symlink skill/ into ~/.claude/skills/techdoc
+rm ~/.claude/skills/techdoc   # uninstall; removes only the link
 ```
 
-This symlinks `skill/` into `~/.claude/skills/techdoc`. Because it's a symlink,
-any edit in this repo is immediately live in Claude Code — no re-install needed.
-
-If `~/.claude/skills/techdoc` already exists as a regular directory, the
-installer refuses to overwrite it. Remove or move it first.
-
-## Uninstall
-
-```sh
-rm ~/.claude/skills/techdoc
-```
-
-Safe because the install is a symlink — only the link is removed, the repo is
-untouched.
+Edits in this repo are live at once. The installer refuses to overwrite an
+existing regular directory at the target.
 
 ## Layout
 
 ```text
 techdoc/
-├── README.md              # this file
-├── install.sh             # symlinks skill/ into ~/.claude/skills/techdoc
+├── README.md
+├── install.sh           # symlinks skill/ into ~/.claude/skills/techdoc
 ├── research/
-│   └── RATIONALE.md        # why these rules, what was cut
+│   └── RATIONALE.md     # why these rules, what was cut
 └── skill/
-    ├── SKILL.md            # entry point loaded by Claude Code
-    ├── STYLE_RULES.md      # the rule set, read on every run
-    ├── scripts/           # format_md.py — mechanical Markdown hygiene
-    └── evals/              # before/after fixtures + evals.json
+    ├── SKILL.md         # entry point loaded by Claude Code
+    ├── STYLE_RULES.md   # the rule set, read on every run
+    ├── scripts/         # format_md.py and its tests
+    └── evals/           # fixtures + evals.json
 ```
 
-## Requirements
+## Test
 
-`python3` (standard library only) for the bundled Markdown formatter. No
-third-party dependencies, so the skill stays portable.
+```sh
+cd skill/scripts && python3 -m unittest
+```

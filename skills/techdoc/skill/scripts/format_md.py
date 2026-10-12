@@ -3,9 +3,9 @@
 
 Enforces the deterministic rules from STYLE_RULES.md that a model should not
 hand-apply: aligned table separators/cells, no trailing whitespace, and
-(in check mode) bare code fences.
+(in check mode) bare code fences. Fenced code is never rewritten.
 
-Stdlib only — no external dependency, so the skill stays portable.
+Stdlib only.
 
 Usage:
     format_md.py FILE ...            # rewrite files in place (align + strip)
@@ -19,6 +19,7 @@ import re
 import sys
 
 SEP_CELL = re.compile(r":?-+:?")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
 def is_row(line):
@@ -67,19 +68,46 @@ def align_block(block):
     return out
 
 
+def classify(lines):
+    """Yield (line, kind, info); kind is "text", "open", "code" or "close"."""
+    fence = None
+    for line in lines:
+        m = FENCE.match(line)
+        if fence is None:
+            if m:
+                fence = m.group(1)
+                yield line, "open", m.group(2).strip()
+            else:
+                yield line, "text", ""
+        elif (
+            m
+            and m.group(1)[0] == fence[0]
+            and len(m.group(1)) >= len(fence)
+            and not m.group(2).strip()
+        ):
+            fence = None
+            yield line, "close", ""
+        else:
+            yield line, "code", ""
+
+
 def format_lines(lines):
     out = []
-    i = 0
-    while i < len(lines):
-        if is_row(lines[i]):
-            j = i
-            while j < len(lines) and is_row(lines[j]):
-                j += 1
-            out.extend(align_block(lines[i:j]))
-            i = j
-        else:
-            out.append(lines[i].rstrip())
-            i += 1
+    table = []
+
+    def flush():
+        out.extend(align_block(table))
+        table.clear()
+
+    for line, kind, _ in classify(lines):
+        if kind == "text" and is_row(line):
+            table.append(line)
+            continue
+        if table:
+            flush()
+        out.append(line if kind == "code" else line.rstrip())
+    if table:
+        flush()
     return out
 
 
@@ -93,13 +121,9 @@ def find_issues(text):
     lines = text.split("\n")
     if format_lines(lines) != lines:
         issues.append("tables not aligned or trailing whitespace present")
-    in_fence = False
-    for n, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            if not in_fence and stripped == "```":
-                issues.append(f"line {n}: code fence has no language")
-            in_fence = not in_fence
+    for n, (_, kind, info) in enumerate(classify(lines), 1):
+        if kind == "open" and not info:
+            issues.append(f"line {n}: code fence has no language")
     return issues
 
 
