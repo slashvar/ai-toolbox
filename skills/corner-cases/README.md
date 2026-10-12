@@ -28,12 +28,12 @@ Safe because the install is a symlink — only the link is removed, the repo is 
 
 ## Layout
 
-```
+```text
 corner-cases/
 ├── skill/                       # INSTALLABLE PAYLOAD (mirrors ~/.claude/skills/corner-cases/)
 │   ├── SKILL.md                 # entry point loaded by Claude Code
 │   ├── references/
-│   │   ├── patterns.md          # 8-pattern catalog under 3 principles
+│   │   ├── patterns.md          # pattern catalog under 3 principles
 │   │   └── examples.md          # worked examples from the research exercises
 │   └── evals/
 │       └── evals.json           # runnable via skill-creator
@@ -48,12 +48,12 @@ corner-cases/
 
 The eval bundled in `skill/evals/evals.json` uses `skill-creator`:
 
-```
+```text
 /skill-creator eval corner-cases
 ```
 
-It runs the `list-refactor` exercise twice — with and without the skill — and grades the outputs. Paths in `evals.json` point inside this repo.
+It runs the `list-refactor` exercise twice — with and without the skill — and grades the outputs. Paths in `evals.json` are relative to the repo root, so run it from there.
 
 ## History
 
-Consolidated from `~/code/corner-case-programming/` (research) and `~/.claude/skills/corner-cases/` (installed skill) in April 2026. Algolia-proprietary source files (`queryparam-parse`, `queryparam-proto`) were excluded; only the ANALYSIS.md writeups remain.
+Consolidated from `~/code/corner-case-programming/` (research) and `~/.claude/skills/corner-cases/` (installed skill) in April 2026. Exercises on private source were dropped; only their lessons remain in `research/LEARNINGS.md`.

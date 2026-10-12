@@ -51,7 +51,7 @@ void insert_at(struct cell *l, struct cell *e, size_t pos) {
 
 ### Before (CLRS-style, 3 sub-cases for "key in internal node")
 
-```
+```text
 if key is in internal node at position j:
   if children[j] has > minimum keys:
     p = find_max(children[j])
@@ -166,53 +166,55 @@ wspd(PointSet<INFO>& set, double s,
 
 ## Principle C in action — spotting FALSE positives on real code
 
-### The metis queryparam 100-branch functions
+### The 100-branch field dispatcher
 
-In `queryparam/proto`, `Accept()`, `all()`, `byName()`, `Override()` each have ~100 `case` or `if` branches — one per parameter. An automated scanner would flag this as "extreme repetition." **It's not corner case programming.** Each parameter is a distinct field with a distinct type and serialization. Go's static type system doesn't offer a cheaper way to dispatch without reflection or codegen — which would cost more than they'd save on 40+ dependent callers.
+A Go query-parameter package has four functions (a field setter, a serializer, a getter by name, a merge) with ~100 `case` or `if` branches each, one per parameter. A scanner flags this as extreme repetition. **It is not corner case programming.** Each parameter has a distinct type and serialization. Go's static types offer no cheaper dispatch without reflection or codegen, which would cost more than they save across 40+ callers.
 
-**Classification**: Principle C (exhaustive variation). Keep as-is. Document the reasoning.
+**Classification**: Principle C (exhaustive variation). Keep as is and document the reasoning.
 
 ### The `corner_cases_test.go` heuristic
 
-The metis `parse` package has a `corner_cases_test.go` file that documents specific behaviors: `aroundLatLng=""` → `[0,0]`, `insidePolygon=""` → `[]`, etc. A naive pattern-match would flag the empty-string guards in the decoders as "redundant boundary guards" (#1). **They're not.** They implement the documented API contract. Removing them breaks observable behavior.
+The same package has a `corner_cases_test.go` documenting specific behaviors: an empty value decodes to `[0,0]` for one parameter and to `[]` for another. A naive scan flags the empty-string guards in the decoders as redundant boundary guards (#1). **They are not.** They implement the documented API contract, and removing them breaks observable behavior.
 
-**Rule**: when a test file is literally named "corner_cases_test", its contents are **contracts** — guardrails for the existing behavior, not targets for elimination.
+**Rule**: a test file named "corner_cases_test" holds **contracts**, not elimination targets.
 
 ---
 
-## Pattern #7 with Go generics (queryparam/parse)
+## Pattern #7 with Go generics (options parser)
 
 ### Before (4 near-duplicate merge functions, ~72 lines)
 
-Each followed the pattern: empty check, `Fields[key]` lookup, setter closure with type assertion, call `ToValueWithSetter`. Only the type and accumulator varied.
+Each had the same pipeline: empty check, schema lookup, setter closure with a type assertion, decode call. Only the type and the accumulator varied.
 
 ### After (1 generic helper + 4 thin callers, ~39 lines)
 
 ```go
-func mergeTyped[T any](field, value string, fromURL bool, accumulate func(T)) error {
-    if len(value) == 0 { return nil }
-    parser, ok := Fields[field]
-    if !ok { return unknownParameter(field) }
-    setter := func(v any) error {
-        accumulate(v.(T))
+func mergeTyped[T any](name, raw string, accumulate func(T)) error {
+    if raw == "" {
         return nil
     }
-    return parser.ToValueWithSetter(value, fromURL, setter)
-}
-
-func (m *merger) mergeFilters(value string, fromURL bool) error {
-    return mergeTyped("filters", value, fromURL, func(f string) {
-        if len(m.filters) > 0 {
-            m.filters = fmt.Sprintf("%s AND %s", m.filters, f)
-        } else {
-            m.filters = f
-        }
+    field, ok := schema[name]
+    if !ok {
+        return fmt.Errorf("unknown field %q", name)
+    }
+    return field.decode(raw, func(v any) error {
+        accumulate(v.(T))
+        return nil
     })
 }
-// similar for mergeAnalyticsTags, mergeDevFeatureFlags, mergeArrayFilters
+
+func (m *merger) mergeFilters(raw string) error {
+    return mergeTyped("filters", raw, func(f string) {
+        if m.filters != "" {
+            f = m.filters + " AND " + f
+        }
+        m.filters = f
+    })
+}
+// similar for mergeTags, mergeFlags, mergeArrayFilters
 ```
 
-**Key insight**: generics let each caller show only what's unique (field name + accumulation), with the pipeline extracted once. The variation becomes explicit and the boilerplate disappears.
+**Key insight**: each caller now shows only what is unique (field name and accumulation); the pipeline lives once. The variation becomes explicit and the boilerplate disappears.
 
 ---
 
@@ -409,7 +411,7 @@ Transform-to-unify applies to grammars as much as to functions. From a Bison par
 
 ### Before (two statement rules with near-identical actions, differing only in the RHS nonterminal)
 
-```
+```text
 tuple_assign_stmt
     : name_list '=' tuple_expr ';'  { /* build node */ }
     | name_list '=' expr       ';'  { /* SAME body, $3 is a plain expr */ }
@@ -417,7 +419,7 @@ tuple_assign_stmt
 
 ### After (a `tuple_rhs` producer absorbs the variation; one rule, one body)
 
-```
+```text
 tuple_rhs
     : expr       { $$ = $1; }
     | tuple_expr { $$ = $1; }
@@ -494,3 +496,105 @@ func (w *ratioWindow) push(errors, total int64) float64 {
 ```
 
 **Key insight**: `filled` was stored only to drive later control flow — the tracking-flag smell (#6). Choosing `count` over a bare cursor makes "full", "spans an interval", and the oldest index all *derivable*, so the flag, its maintenance `if`, and the whole three-way `oldest()` helper vanish. (Compare `maxd()` above: that #6 fix *caches* a postcondition; this one *picks state* so there's nothing to reconstruct.)
+
+---
+
+## Patterns #11, #12, #1, #7 — one rule, many forms (settings write)
+
+A rule decides whether a settings write must trigger a rebuild. The payload overlays the current settings; a received `Source` block replaces the stored one as a whole. A human reviewer reported 15 minutes to read the first version.
+
+### Before (mixed forms, a perf guard, a shadow variable)
+
+```go
+func RebuildSettings(current, payload []byte) (*Settings, error) {
+    var to struct {
+        Mode   string
+        Beta   *bool
+        Source *Source
+    }
+    // ... unmarshal payload ...
+    if to.Mode == "" && to.Beta == nil && to.Source == nil { // perf guard
+        return nil, nil
+    }
+    from := Parse(current)
+    next := from
+    if to.Mode != "" {
+        next.Mode = to.Mode
+    }
+    if to.Beta != nil {
+        next.Beta = *to.Beta
+    }
+    var written Source
+    if to.Source != nil {
+        written = *to.Source // shadow of `to`
+        next.Source = written
+    }
+    stored := &from.Source
+    enables := !from.Enabled() || // state test
+        (!from.Beta && next.Beta) // transition test
+    reconfigures := written.HasFields() || // presence only
+        (written.HasModel() && written.Model != stored.Model) || // presence + change
+        (written.HasParams() && !maps.Equal(written.Params, stored.Params))
+    if next.Enabled() && (enables || reconfigures) {
+        return &next, nil
+    }
+    return nil, nil
+}
+```
+
+### After (one rule, uniform siblings, names that say what they hold)
+
+```go
+func RebuildSettings(currentJSON, payload []byte) (*Settings, error) {
+    current := Parse(currentJSON)
+    var received struct {
+        Mode   string
+        Beta   *bool
+        Source *Source
+    }
+    // ... unmarshal payload ...
+    updated := current
+    if received.Mode != "" {
+        updated.Mode = received.Mode
+    }
+    if received.Beta != nil {
+        updated.Beta = *received.Beta
+    }
+    if received.Source != nil {
+        updated.Source = *received.Source // replaced as a whole
+    }
+    if !updated.Enabled() {
+        return nil, nil
+    }
+    if switchesOn(&current, &updated) || received.Source.changes(&current.Source) {
+        return &updated, nil
+    }
+    return nil, nil
+}
+
+func switchesOn(current, updated *Settings) bool { // #11: two transitions
+    return (current.Mode != "on" && updated.Mode == "on") ||
+        (!current.Beta && updated.Beta)
+}
+
+func (s *Source) changes(stored *Source) bool { // #11: three "provided and changed"
+    return s != nil && // #7: nil means nothing received
+        ((s.HasFields() && !slices.Equal(s.Fields, stored.Fields)) ||
+            (s.HasModel() && s.Model != stored.Model) ||
+            (s.HasParams() && !maps.Equal(s.Params, stored.Params)))
+}
+```
+
+### Moves, in order
+
+| Move                                                       | Pattern | Check that made it safe                                               |
+|------------------------------------------------------------|---------|-----------------------------------------------------------------------|
+| Drop the perf guard                                        | #1      | Substitution: no fields received → `updated == current` → nil anyway  |
+| Uniform transitions                                        | #11     | One new failing test per changed input; behavior change approved      |
+| Uniform "provided and changed"                             | #11     | Same                                                                  |
+| Remove `written`                                           | #7      | A nil receiver on `changes` is the general "nothing received" case    |
+| Early return on `!updated.Enabled()`                       | #12     | Every gated case implies it                                           |
+| Reject "switches on = `!current.Enabled()`"                | #12     | A pinning test failed: `mode` switched on while `beta` was already on |
+| Rename `from/to/next/written` → `current/received/updated` | —       | Name the role, not the step; `currentJSON` names the raw form         |
+
+**Key insight**: the readability complaint and the logic gaps had one cause. Siblings in different forms hid two behavior differences nobody had chosen. Making the forms agree fixed both, and the tests written first showed exactly which inputs changed.

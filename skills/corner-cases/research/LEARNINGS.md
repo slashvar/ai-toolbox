@@ -109,64 +109,53 @@ Manual review of the `insert` function revealed that `find_or_index` calls after
 
 **Real code validates the catalog but also extends it.** Purpose-built exercises found patterns in control flow (guards, loops, postconditions). Real code added patterns in API design (overload selection) and error handling (defensive fallbacks). A complete skill needs both categories.
 
-## Exercise 6: `queryparam/proto` in metis — large real-world Go, validating Principle C
+## Exercise 6: a large Go query-parameter package — validating Principle C
 
-**Result**: 3 small genuine corner cases fixed. All tests pass (queryparam/* and reducer/*). Full build succeeds. Branch: `marwan/refactor/queryparam-corner-cases`. Diff: 2 files, -14/+11 lines.
+**Result**: 3 small genuine corner cases fixed. All tests pass and the full build succeeds. Diff: 2 files, -14/+11 lines. The source is private and omitted.
 
 ### The big finding: most of the package is NOT corner case programming
 
-The package has 4 mega-functions with ~100 branches each:
-- `Accept(field, value)` — type-dispatched field setter
-- `all(asURL)` — type-dispatched serializer iterator
-- `byName(p, name)` — field getter by name
-- `Override(x)` — field-by-field merge with nil checks
+Four mega-functions have ~100 branches each: a type-dispatched field setter, a serializer iterator, a getter by name, and a field-by-field merge with nil checks.
 
-These LOOK like corner case programming (massive repetition, many branches), but they're not. Each of 100+ parameters is genuinely different (different type, default, serialization). This is the correct way to handle exhaustive field dispatch in Go without reflection or code generation. The repetition is the cost of static type safety.
+These LOOK like corner case programming (massive repetition, many branches), but they're not. Each of 100+ parameters is genuinely different (type, default, serialization). This is the correct way to handle exhaustive field dispatch in Go without reflection or code generation. The repetition is the cost of static type safety.
 
-**This is Principle C in action at scale.** The condition-test rule confirms: between the 100 branches, no condition is tested twice on the same state — each branch handles a distinct field.
+**This is Principle C at scale.** By the condition-test rule, no condition is tested twice on the same state: each branch handles a distinct field.
 
 ### Small genuine corner cases that WERE fixed
 
-1. **`Filters` merge in `Override`** (pattern #7): replaced `f := ""` + conditional reassignment with direct if/else. Cleaner control flow, same behavior.
-
-2. **`mergeExtensions` early return** (pattern #1): removed `if current == nil && len(update) == 0 { return nil }` — the post-loop `if len(current) == 0 { return nil }` already handles this case. Verified by tracing: both paths produce `nil`.
-
-3. **`valueToUInt64`** (principle A): replaced awkward "unconditional assign + conditional retry" with a clean type switch. Also eliminated the odd "return pointer-to-zero on error" behavior.
+1. **String-concatenation merge** (pattern #7): replaced `f := ""` + conditional reassignment with a direct if/else. Same behavior, clearer flow.
+2. **Early return in a map-merge helper** (pattern #1): removed a nil-and-empty check; the post-loop `if len(current) == 0 { return nil }` already covers it. Verified by tracing: both paths produce `nil`.
+3. **A value-to-uint64 converter** (principle A): replaced "unconditional assign + conditional retry" with a type switch. This also removed the odd "return pointer-to-zero on error" behavior.
 
 ### Key learnings
 
-- **Principle C discrimination is the skill's most valuable feature on real code.** Without it, a refactorer would try to "DRY up" the 4 mega-functions and either break things or add significant complexity (reflection, codegen). Recognizing that the repetition is essential variation saves the codebase from misguided refactoring.
+- **Principle C discrimination is the skill's most valuable feature on real code.** Without it, a refactorer would try to "DRY up" the mega-functions and add reflection or codegen, or break things.
+- **Small corner cases hide inside big functions.** The 3 genuine issues sat in small helpers the mega-functions call, not in the mega-functions. Scan by function, not by file.
+- **Some findings are not corner cases but still fixable.** The `new(fmt.Sprintf(...))` in the merge was awkward syntax, not corner case programming. Our skill catches corner cases; code quality review (`/simplify`) catches other smells.
+- **Scope discipline matters.** The mega-function refactor (table-driven, reflection, codegen) was tempting and risky across 40+ callers. Don't attempt changes whose risk exceeds the clarity win.
 
-- **Small corner cases hide inside big functions.** The 3 genuine issues were not in the mega-functions — they were in smaller helpers that the mega-functions call. Lesson: scan by function, not by file. Don't let visual repetition mask the smaller patterns.
+## Exercise 7: the same package's parser — generics for Pattern #7 in Go
 
-- **Some findings are not corner cases but still fixable.** The `new(fmt.Sprintf(...))` in the filters merge wasn't corner case programming — it was just awkward Go syntax that works but confuses readers. The refactor was about clarity, not corner case elimination. Good to note: our skill catches corner cases, but code quality review (`/simplify`) catches other smells.
-
-- **Scope discipline matters.** The temptation was to attempt the mega-function refactor (table-driven, reflection, codegen). We resisted. The 3 small wins delivered real value; the big refactor would have been risky on 40+ callers. Principle: don't attempt changes whose risk exceeds the clarity win.
-
-## Exercise 7: `queryparam/parse` in metis — generics for Pattern #7 in Go
-
-**Result**: 4 changes across 2 files. All tests pass. Branch: same as exercise 6. Net -31 lines.
+**Result**: 4 changes across 2 files. All tests pass. Net -31 lines. The source is private and omitted.
 
 ### The big finding: tests document corner case contracts
 
-`corner_cases_test.go` literally lists the intentional empty-string behaviors — `aroundLatLng=""` → `[0,0]`, `insidePolygon=""` → `[]`, etc. These are the public contract, tested explicitly. The empty-string guards in the decoders implement them. **Removing those guards would be a breaking change disguised as a refactor.**
+`corner_cases_test.go` lists the intentional empty-string behaviors, for example an empty value decoding to `[0,0]` or `[]`. These are the public contract, tested explicitly, and the guards in the decoders implement them. **Removing those guards would be a breaking change disguised as a refactor.**
 
-This is a critical lesson: when a codebase has a file named `corner_cases_test.go`, its contents are a list of **intentional corner cases** — not candidates for elimination but guardrails for the existing behavior.
+When a codebase has a file named `corner_cases_test.go`, its contents are **intentional corner cases**: guardrails for existing behavior, not elimination candidates.
 
 ### Target that mattered: unifying 4 merge functions with generics (Pattern #7)
 
-The four merge functions (`mergeFilters`, `mergeAnalyticsTags`, `mergeDevFeatureFlags`, `mergeArrayFilters`) all had the same 4-step pipeline:
+Four merge functions shared one pipeline:
 1. Empty-value guard
-2. `Fields[key]` lookup + error
+2. Schema lookup + error
 3. Setter closure with type assertion
-4. Call `parser.ToValueWithSetter`
+4. Decode call
 
-Only the type and accumulation varied. Unified via a generic helper `mergeTyped[T any](field, value, fromURL, accumulate func(T))`. Each specific function now shows only the field name + what to accumulate — the plumbing is gone.
-
-72 lines → 39 lines. The variation between functions (which was masked by repeated boilerplate) is now explicit and visible.
+Only the type and the accumulation varied. A generic helper `mergeTyped[T any](name, raw, accumulate func(T))` unified them. Each function now shows the field name and what to accumulate, and the plumbing is gone: 72 lines → 39. The variation, masked by repeated boilerplate, is now explicit.
 
 ### Key learning
 
-**Generics are Pattern #7's best tool in Go.** The previous demonstrations of Pattern #7 (B-tree remove's predecessor swap) were about algorithmic transformation. This is about boilerplate transformation. Both forms of the pattern share the same principle: when N paths lead to the same operation with parameter variation, extract the operation and parameterize the variation.
+**Generics are Pattern #7's best tool in Go.** Earlier demonstrations (B-tree remove's predecessor swap) were algorithmic transformation; this is boilerplate transformation. Both share one principle: when N paths lead to the same operation with parameter variation, extract the operation and parameterize the variation.
 
-**This exercise reinforces exercise 6**: on real code, most "duplication" is genuine variation (Principle C), but the genuine Pattern #7 cases are worth the refactoring effort. The skill is distinguishing them — and that's exactly what our catalog helps with.
+**This exercise reinforces exercise 6**: on real code, most "duplication" is genuine variation (Principle C), but the genuine #7 cases are worth the refactoring. The skill is telling them apart, and the catalog helps with that.
