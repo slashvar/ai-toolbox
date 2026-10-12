@@ -89,11 +89,9 @@ Tests needing a live service (Postgres, Redis, a broker) fail when it is down
 CI provisions the infra. Investigate only if the diff touches that integration
 path. Skip them locally, most specific first:
 
-| Option                                      | Command                                                    |           |                                  |
-|---------------------------------------------|------------------------------------------------------------|-----------|----------------------------------|
-| The repo's unit-only target, when it exists | `make test-unit` (check `Makefile` for the name)           |           |                                  |
-| By test name                                | `go test -skip 'Redis\                                     | Postgres\ | Integration' <pkgs>` (Go ≥ 1.20) |
-| By convention                               | `go test -short <pkgs>`, or omit the integration build tag |           |                                  |
+- **The repo's unit-only target**, when it exists: `make test-unit` (check the `Makefile` for the name).
+- **By test name** (Go ≥ 1.20): `go test -skip 'Redis|Postgres|Integration' <pkgs>`.
+- **By convention**: `go test -short <pkgs>`, or omit the integration build tag.
 
 Say in the report which tests were skipped.
 
