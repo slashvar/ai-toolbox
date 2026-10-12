@@ -13,101 +13,75 @@ description: >
 
 # pr
 
-General-purpose pull request workflow. Adapts to any repo by discovering its PR
-template and contributing guidelines at runtime.
-
----
+Open a pull request. The skill discovers the repo's PR template and contributing
+guide at runtime, so it fits any repo.
 
 ## Step 1 — Understand the changes
 
-Run these in parallel:
-
 ```bash
-git status                          # untracked + modified files
-git diff HEAD                       # staged + unstaged changes
+git status
+git diff HEAD
 git log --oneline -10               # recent commit style
-```
-
-Then confirm the branch forks from the intended base. With multiple terminals
-or sessions open, `HEAD` can shift silently, so a branch created "off main" can
-inherit another feature branch as its base — the PR then carries commits that
-don't belong to it and shows an inflated diff.
-
-```bash
 git fetch --quiet origin
+gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
 git log --oneline origin/<default-branch>..HEAD   # commits this branch adds
 ```
 
-These should be *only* the commits belonging to this change; read them together
-with the full diff to write an accurate description. If unrelated commits appear
-(another feature's work), the branch was cut from the wrong base — stop and tell
-the user. The usual fix is to re-create the branch from the intended base and
-re-apply the change:
+The last list must hold *only* this change's commits. With several terminals or
+sessions open, `HEAD` can shift silently, so a branch cut "off main" may carry
+another feature's commits and an inflated diff. If unrelated commits appear, stop
+and tell the user. The usual fix is to re-create the branch from the intended
+base and re-apply the change (cherry-pick, or `rebase --onto`).
 
-```bash
-git checkout <default-branch> && git pull
-git checkout -b <owner>/<type>/<scope>/<short-description>
-# then re-apply the change (cherry-pick the relevant commits, or rebase --onto)
-```
+**Intentional stacked PR**: when the branch is meant to stack on a parent branch
+(Step 6), the parent's commits are expected. Confirm the extras are exactly the
+parent's.
 
-**Exception — intentional stacked PR.** If the branch is *meant* to stack on a
-parent feature branch (see Step 6), the parent's commits appearing here is
-expected. Confirm the extra commits are exactly the parent's, not something
-unrelated.
+Read the commits together with the full diff to write an accurate description.
 
 ## Step 2 — Branch naming
 
-Use the pattern `<owner>/<type>/<scope>/<short-description>`.
+Pattern: `<owner>/<type>/<scope>/<short-description>`.
 
-- **owner**: your handle — derive it once from `gh api user --jq .login` (or
-  `git config user.name`, lowercased/hyphenated). This namespaces your branches
-  on shared remotes. Omit it if the repo's own convention doesn't use an owner
-  prefix (see below).
-- **type**: `feat`, `fix`, `refactor`, `chore`, `test`, `docs`
-- **scope**: the component or package being changed (e.g., `parser`, `auth`)
-- **short-description**: lowercase, hyphen-separated
+| Part                | Rule                                                                                                                                            |
+|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `owner`             | Your handle: `gh api user --jq .login`, or `git config user.name` lowercased and hyphenated. Omit if the repo's convention has no owner prefix. |
+| `type`              | `feat`, `fix`, `refactor`, `chore`, `test`, `docs`                                                                                              |
+| `scope`             | Component or package changed (`parser`, `auth`)                                                                                                 |
+| `short-description` | Lowercase, hyphen-separated                                                                                                                     |
 
-**Defer to the repo's own convention if it has one.** Check recent branch names
-(`git branch -r --sort=-committerdate | head`) and CONTRIBUTING.md — if the
-project mandates a different scheme (e.g. `<ticket-id>-description`), follow that
-instead of this default.
+**The repo's own convention wins.** Check recent branches
+(`git branch -r --sort=-committerdate | head`) and CONTRIBUTING.md; follow a
+mandated scheme such as `<ticket-id>-description` instead.
 
-Check the current branch name. If it doesn't match the chosen pattern, rename it:
-
-```bash
-git branch -m <old-name> <owner>/<type>/<scope>/<short-description>
-```
+If the current branch does not match, rename it:
+`git branch -m <old-name> <owner>/<type>/<scope>/<short-description>`.
 
 ## Step 3 — Quality gates
 
-Before committing, run the quality pipeline appropriate for the current repo.
-Detect the repo type by checking project markers, then apply the matching
-strategy. Fix any failures before proceeding.
+Detect the repo type and run its checks before committing. Fix failures first.
 
-| Signal | Check action |
-|--------|-------------|
-| A repo/language-specific check skill is installed (e.g. `go-check`) | Prefer it — scoped to affected packages |
-| Has `go.mod` | `golangci-lint run ./...` then `go test ./...` on affected packages |
-| Has `package.json` | `npm test` or `yarn test` (and lint script if present) |
-| Has `Cargo.toml` | `cargo clippy` then `cargo test` |
-| Has `pyproject.toml` / `setup.py` | the project's lint + `pytest` |
-| Has `Makefile` with a test target | `make test` (and `make lint` if present) |
-| None of the above | Skip checks, note it to the user |
+| Signal                                             | Check                                                      |
+|----------------------------------------------------|------------------------------------------------------------|
+| A stack check skill is installed (e.g. `go-check`) | Use it; it scopes to affected packages                     |
+| `go.mod`                                           | `golangci-lint run` then `go test`, on affected packages   |
+| `package.json`                                     | `npm test` or `yarn test`, plus the lint script if present |
+| `Cargo.toml`                                       | `cargo clippy` then `cargo test`                           |
+| `pyproject.toml` / `setup.py`                      | The project's lint, then `pytest`                          |
+| `Makefile` with a test target                      | `make test` (and `make lint` if present)                   |
+| None                                               | Skip and tell the user                                     |
 
-Then, if a `/simplify`-style review skill is available, run it to review changes
-for reuse, quality, and efficiency. Fix any findings before committing.
+Then run a `/simplify`-style review skill if one is available, and fix its
+findings before committing.
 
 ## Step 4 — Commit (if needed)
 
-If there are uncommitted changes, stage and commit them. Follow these rules:
+Skip when nothing is uncommitted. Otherwise follow `/commit` (stage named files,
+never `git add -A`; never amend a commit already on origin), with the message:
 
-- Stage specific files (`git add <files>`), never `git add -A` or `git add .`
-- Use Conventional Commits: `<type>(<scope>): <imperative description>`
-- Keep the first line under 72 characters
-- Add a body for non-trivial changes explaining *why*
-- Always include the co-author trailer with the current model name
-- Never amend a commit that already exists on origin — create a new commit
-- Use a HEREDOC for the message:
+- Conventional Commits: `<type>(<scope>): <imperative description>`, first line under 72 characters.
+- A body explaining *why*, for non-trivial changes.
+- The co-author trailer with the current model name.
 
 ```bash
 git commit -m "$(cat <<'EOF'
@@ -120,21 +94,17 @@ EOF
 )"
 ```
 
-If there are already commits on the branch and nothing is uncommitted, skip this step.
-
 ## Step 5 — Discover repo conventions
 
-Look for these files in the repo root (check in parallel):
+Look in parallel for:
 
-1. **PR template**: `.github/PULL_REQUEST_TEMPLATE.md`, `.github/pull_request_template.md`, or `docs/pull_request_template.md`
-2. **Contributing guide**: `CONTRIBUTING.md`
+- **PR template**: `.github/PULL_REQUEST_TEMPLATE.md`, `.github/pull_request_template.md` or `docs/pull_request_template.md`.
+- **Contributing guide**: `CONTRIBUTING.md`.
 
-These inform how the PR body is structured. If a PR template exists, use it as
-the skeleton — but **omit any section that would be empty** (no blank headings).
-If the template has a contribution criteria checkbox that references
-CONTRIBUTING.md, check it (`- [x]`).
+Use a template as the skeleton, but **omit any section that would be empty**.
+Tick a contribution-criteria checkbox that references CONTRIBUTING.md (`- [x]`).
 
-If no PR template exists, use this default:
+Without a template:
 
 ```markdown
 ## Summary
@@ -146,44 +116,33 @@ If no PR template exists, use this default:
 - <bullet points>
 ```
 
-## Step 6 — Push and create PR
+## Step 6 — Push and create the PR
 
 ```bash
 git push -u origin <branch-name>
 ```
 
-Then create the PR. The title should be the conventional commit headline
-(`<type>(<scope>): <description>`).
+The title is the conventional-commit headline. **Stacked PR** (branch cut from
+another feature branch, not the default): pass `--base <parent-branch>` and add a
+"Stacked on" section linking the parent PR.
 
-**Stacked PRs:** If the branch was created on top of another feature branch
-(not `main`/`master`), set `--base` to the parent branch. Add a
-"Stacked on" section to the body linking the parent PR.
+### Body constraints
 
-### PR body — hard constraints (enforce before calling `gh pr create`)
+Check the draft against every row *before* `gh pr create`; rewrite on any miss.
 
-These are not "guidelines" — they are constraints. Self-check the drafted body
-against this list. If any check fails, rewrite before submitting.
+| Constraint          | Rule                                                                                                                          |
+|---------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| Bullet              | One rendered line: ≤120 chars, one clause (no "X. Y." or "X — Y because Z").                                                  |
+| Summary             | 3–5 bullets, each saying *why* or naming the minimum observable change. No code, file paths or method names.                  |
+| Test plan           | 3–4 bullets, each naming a verification *run* (`go test`, `golangci-lint`, "smoke test in staging"). No narrative or caveats. |
+| Sub-bullets         | None. Promote the content to a top-level bullet, or cut it.                                                                   |
+| Length              | ≤15 rendered lines.                                                                                                           |
+| Caveats, follow-ups | Omit ("deferred X to PR Y"); they belong in the commit body or an issue.                                                      |
 
-- **Each bullet renders as ONE line.** Source rule: ≤120 chars per bullet,
-  no multi-clause bullets (no "X. Y." or "X — Y because Z"). If a bullet wraps
-  on a typical PR page (~100 chars wide rendered), split or shorten.
-- **Summary: 3–5 bullets max.** Each answers *why* (what problem it solves)
-  or names the minimum observable change. No implementation walkthrough —
-  no code snippets, no file paths, no method names.
-- **Test Plan: 3–4 bullets max.** Each names a verification *run* (e.g.,
-  `go test`, `golangci-lint`, "smoke test in staging"). No narrative,
-  no caveats, no deferred-work notes.
-- **No sub-bullets.** Reviewers skim — a sub-bullet means the parent bullet
-  was already too long. Promote sub-bullet content to its own top-level
-  bullet, or cut it.
-- **Total body: ≤15 lines rendered.** If it's longer, you're over budget.
-- **Caveats and follow-ups** (e.g., "deferred X to PR Y"): omit from the
-  PR body. They belong in the commit body, an issue, or a tracking note.
+Same change, BAD then GOOD:
 
-Worked example — same change, BAD then GOOD:
-
-BAD (3 multi-clause bullets, implementation detail, internal narrative):
-```
+```text
+BAD
 - Wires up a cache layer so repeated lookups skip the DB round-trip — the
   resolver now checks the LRU before querying, and falls through on a miss,
   which cuts p99 latency on the hot path.
@@ -192,10 +151,8 @@ BAD (3 multi-clause bullets, implementation detail, internal narrative):
   it without a redeploy, defaulting to 5m.
 - Verified locally by hammering the endpoint with a loop of 10k requests and
   eyeballing the latency histogram in the debug dashboard, which looked flat.
-```
 
-GOOD (same information, one-line bullets, why-focused):
-```
+GOOD
 - Adds an LRU cache to the resolver so repeated lookups skip the DB round-trip.
 - TTL is config-driven (default 5m) — tunable without a redeploy.
 - Verified: `go test ./resolver/...` and a 10k-request local load loop.
@@ -203,23 +160,20 @@ GOOD (same information, one-line bullets, why-focused):
 
 ```bash
 gh pr create --title "<type>(<scope>): <description>" --body "$(cat <<'EOF'
-<filled-in template with bullet points, empty sections omitted>
+<filled-in template, empty sections omitted>
 EOF
 )"
 ```
 
-After running `gh pr create`, if the rendered body fails any of the
-constraints above, immediately update the PR with `gh pr edit <N> --body …`.
+If the created body still breaks a constraint, fix it with `gh pr edit <N> --body …`.
 
 ## Step 7 — Report
 
-Return the PR URL to the user.
+Return the PR URL.
 
-## Post-push CI gotcha — static-analysis false positives
+## Post-push scanner false positives
 
-Some checks (Codacy/Semgrep and similar SaaS scanners) run only after push, not
-in local lint. If one flags a finding you believe is a false positive, suppress
-it with the scanner's own inline directive naming the exact rule id — not a
-freeform comment. For Go + Codacy/Semgrep specifically, the `go-check` skill has
-the verified suppression form, the rule-id table, and the search recipe for
-finding new ids.
+Scanners such as Codacy and Semgrep run only after push, not in local lint. If
+one flags a false positive, suppress it with the scanner's inline directive
+naming the exact rule id, not a freeform comment. For Go with Codacy/Semgrep, the
+`go-check` skill has the verified form, a rule-id table and a lookup recipe.
