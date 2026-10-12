@@ -25,14 +25,10 @@ and archaic usage. They add length without changing how a technical doc reads.
 
 ## Structural rules
 
-Strunk predates Markdown and structured technical docs. These are the author's
-own conventions — the skill's real differentiator:
-
-- Tables/bullets over paragraphs.
-- Section depth capped at 3.
-- No lone subsection.
-- Short titles; no repeated section purpose.
-- No audience/tech-level/purpose boilerplate (opt-in override).
+Strunk predates Markdown and structured docs. The structural rules in
+`STYLE_RULES.md` (tables over paragraphs, depth cap, no lone subsection, short
+titles, no boilerplate) are the author's own conventions and the skill's real
+differentiator.
 
 ## Design choices
 

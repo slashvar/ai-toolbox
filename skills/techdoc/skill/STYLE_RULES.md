@@ -1,7 +1,6 @@
 # techdoc style rules
 
-The checklist. Apply every rule on every run. Rules are grouped: **prose**,
-**structure**, **markdown hygiene**. Each row is one rule + a fix.
+The checklist. Apply every rule on every run.
 
 ## Prose
 
@@ -45,20 +44,15 @@ The raw source must read cleanly without a renderer.
 - **One blank line** between blocks (heading, paragraph, list, table, fence).
 - **Language on fences.** Tag every fence — `bash`, `go`, or `text` for plain
   output, trees, and changelogs. Never a bare ` ``` `.
-- **Reference-free links inline** for short docs; only use link references when
-  a URL repeats.
+- **Inline links.** Use link references only when a URL repeats.
 - **No trailing whitespace**, no hard-wrapped tables.
 
-Alignment and trailing whitespace are mechanical — do not hand-apply them. The
-skill's `scripts/format_md.py` enforces them and flags bare fences. See the
-"Markdown hygiene (mechanical)" section of `SKILL.md`.
+`scripts/format_md.py` enforces alignment and whitespace and flags bare fences
+(see Formatter in `SKILL.md`).
 
 ## Control hints (invocation-time)
 
 The user may steer style at invocation ("terse", "for experts", "assume no
-prior context"). Use hints to calibrate tone and depth. **Do not** write them
-into the document.
-
-Exception — **opt-in**: if the user explicitly asks to surface a hint (e.g.
-"state the audience", "add a purpose line"), include it. Explicit request
-overrides the no-meta-boilerplate rule.
+prior context"). Use hints to calibrate tone and depth. Do not write them into
+the document, unless the user explicitly asks to surface one ("state the
+audience"). That request overrides the no-meta-boilerplate rule.
