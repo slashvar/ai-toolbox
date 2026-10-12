@@ -15,170 +15,148 @@ description: >
 
 # go-check
 
-Two-step check for Go code: **lint → test**. Scope to the affected package(s),
-not the whole module, unless you're doing a pre-merge full sweep.
+Two steps: **lint → test**, scoped to the packages the diff touches. Go
+whole-repo only for a pre-merge sweep.
 
 ## Setup — match CI's golangci-lint version
 
-If the repo pins an exact golangci-lint version in CI (commonly
-`.github/workflows/*.yml` via `golangci-lint-action`), whatever's on `$PATH` may
-be older and silently skip rules CI enforces (godot's capital/period checks,
-revive's `redundant-test-main-exit`, etc.). Install the pinned version once so
-direct `golangci-lint` calls reproduce CI:
-
-```bash
-# Find the pinned version (adjust the workflow filename to the repo):
-grep -rA2 "golangci-lint-action" .github/workflows/ | grep version:
-# example output: "          version: v2.11.4"
-
-# Install (writes to $GOPATH/bin, overrides any older binary on $PATH).
-# The module path carries the major version: .../v2/... for a v2.x pin, and
-# .../golangci-lint/cmd/... (no /v2) for a v1.x pin.
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
-golangci-lint --version   # confirm
-```
-
-**Re-run the install whenever the workflow's pinned version bumps** — `go install`
-does not auto-update. One-liner that always pulls whatever the workflow says today
-(the grep assumes the `version:` is within 2 lines of the action ref and is the
-only one in that window — `echo` it to sanity-check before installing):
+A stale `golangci-lint` on `$PATH` silently skips rules CI enforces (godot's
+capital/period checks, revive's `redundant-test-main-exit`, …). If CI pins a
+version, install that one. Re-run after every pin bump; `go install` does not
+auto-update.
 
 ```bash
 v=$(grep -rhA2 "golangci-lint-action" .github/workflows/ | sed -n 's/.*version: //p' | tr -d ' "' | head -1)
-echo "pinned golangci-lint: $v"
+echo "pinned golangci-lint: $v"   # sanity-check: first `version:` within 2 lines of the action
 case "$v" in
   v2*) mod=github.com/golangci/golangci-lint/v2/cmd/golangci-lint ;;
-  *)   mod=github.com/golangci/golangci-lint/cmd/golangci-lint ;;   # v1.x: no /v2 segment
+  *)   mod=github.com/golangci/golangci-lint/cmd/golangci-lint ;;   # v1.x: no /v2
 esac
-go install "$mod@$v"
+go install "$mod@$v" && golangci-lint --version
 ```
 
-If a global install is undesirable (locked-down env), `go run <module>@<version>
-run <paths>` works per-invocation (use the same `/v2`-or-not module path as
-above) — slower, cached after first fetch.
+Where a global install is undesirable, `go run "$mod@$v" run <paths>` works per
+call (slower; cached after the first fetch). With no pin, use the binary on
+`$PATH`.
 
-If the repo doesn't pin a version, just use the `golangci-lint` on `$PATH`.
+## Quick check (default, pre-push)
 
-## Quick check (default — pre-push)
+Derive the changed packages once, then lint and test them:
 
 ```bash
-golangci-lint run ./path/to/changed/pkg/...
-go test         ./path/to/changed/pkg/...
+base=origin/<default-branch>
+pkgs() { git diff --name-only --diff-filter=d "$base"...HEAD -- '*.go' | xargs -n1 dirname | sort -u | sed 's|^|./|'; }
+pkgs | xargs golangci-lint run --new-from-rev="$base"
+pkgs | xargs go test
 ```
 
-**Scope to packages you touched** (not `./...`). Pre-push checks are about your
-own diff; whole-repo coverage is for the broader full-pipeline path below.
+- **Scope**: never lint a parent dir or `./...` pre-push. It surfaces old issues in packages the diff never touched.
+- **`--new-from-rev`**: gates only on issues the diff introduces. To see the rest of the changed packages, re-run without it and report those findings **separately** as pre-existing. Do not fix them unasked.
+- **Build tags**: a changed dir whose files all sit behind `//go:build <tag>` fails with "build constraints exclude all Go files". Lint it with `--build-tags <tag>` and test it with `-tags <tag>` (e2e tests usually need infra: see below), or drop it from the list.
+- **Bare `make lint`**: usually `golangci-lint run` with no path, so it walks the whole module. Pass explicit packages instead.
 
-If lint fails, fix the reported issues and re-run lint before running tests.
-If tests fail, fix and re-run both steps from the top.
-
-### Don't trust a bare `make lint`
-
-A repo's `make lint` is often just `golangci-lint run` with no path → it walks
-the whole module AND uses whatever `$PATH` provides. If you've followed the
-Setup step the version is right, but the scope is still whole-repo. For a
-pre-push check, stick with explicit package paths.
+If lint fails, fix and re-run lint before testing. If tests fail, fix and re-run both from the top.
 
 ## Full pipeline (broad changes, pre-merge)
 
-When you actually need whole-repo coverage (e.g. a wide refactor before merging
-a long-running branch):
-
 ```bash
 golangci-lint run ./...
-go test -race ./...
-# If the repo has integration/nightly build tags, include them as CI does:
-# go test -race -tags=integration,nightly ./...
+go test -race ./...    # add -tags=<tags> when CI builds integration/nightly tags
 ```
 
-If the repo provides faster make targets (`make test-incremental`, `make test`),
-prefer them once you've confirmed what they actually run.
+If the repo has faster targets (`make test-incremental`, `make test`), prefer
+them once you have confirmed what they run.
 
 ## Common failures
 
-| Symptom | Fix |
-|---------|-----|
-| `errcheck`: unchecked error | Handle or explicitly ignore the return |
-| `shadow`: "err" shadows outer | Rename inner var or use `=` instead of `:=` |
-| `revive`: missing godoc | Add a comment to the exported symbol |
-| `unused` | Remove the dead identifier |
-| `FAIL` + diff | Logic regression — re-read the test expectation |
-| `build failed` before tests | Compilation error; fix first |
-| `connection refused` / missing `*_URL` env / dial errors | Infra-dependent test (DB, cache, broker) with no backing service — **not a code regression**; see below |
-
-**Infra-dependent test failures are not your diff's fault.** Tests that need a
-live service (DB, cache, broker) fail with connection errors — `dial tcp ...
-connection refused`, an unset `POSTGRES_URL`/`REDIS_URL` — when that service
-isn't running locally, regardless of your change. Don't "fix" them and don't
-treat them as a gate. Skip them by default (`go test -short`, or the repo's
-build tag) and rely on CI, which provisions the infra. Only investigate if your
-change touched that integration path.
+| Symptom                                          | Fix                                                             |
+|--------------------------------------------------|-----------------------------------------------------------------|
+| `errcheck`: unchecked error                      | Handle or explicitly ignore the return                          |
+| `shadow`: "err" shadows outer                    | Rename inner var or use `=` instead of `:=`                     |
+| `revive`: missing godoc                          | Add a comment to the exported symbol                            |
+| `unused`                                         | Remove the dead identifier                                      |
+| `FAIL` + diff                                    | Logic regression — re-read the test expectation                 |
+| `build failed` before tests                      | Compilation error; fix first                                    |
+| `connection refused`, unset `*_URL`, dial errors | Infra-bound test with no backing service — **not a regression** |
 
 Never edit generated files (`proto/gen/`, `*_gen.go`, `mock_*.go`). Fix the
-generator source instead.
+generator source.
+
+### Infra-bound tests
+
+Tests needing a live service (Postgres, Redis, a broker) fail when it is down
+(Docker off), whatever your change. Do not "fix" them and do not gate on them;
+CI provisions the infra. Investigate only if the diff touches that integration
+path. Skip them locally, most specific first:
+
+| Option                                      | Command                                                    |           |                                  |
+|---------------------------------------------|------------------------------------------------------------|-----------|----------------------------------|
+| The repo's unit-only target, when it exists | `make test-unit` (check `Makefile` for the name)           |           |                                  |
+| By test name                                | `go test -skip 'Redis\                                     | Postgres\ | Integration' <pkgs>` (Go ≥ 1.20) |
+| By convention                               | `go test -short <pkgs>`, or omit the integration build tag |           |                                  |
+
+Say in the report which tests were skipped.
+
+### Shell notes
+
+zsh with `noclobber` makes `>` fail silently on an existing file. Snippets that
+save output (lint logs, test results) use `>|`.
 
 ## Codacy / Semgrep false positives (CI-only, post-push)
 
-Local `golangci-lint` does not run Codacy/Semgrep — those checks fire only after
-push. Codacy runs Semgrep under the hood, so a Codacy `action_required` finding
-with a prose message ("The application dynamically constructs file or path
-information.", "Detected directly writing … in `http.ResponseWriter.write()`.
-This bypasses HTML escaping…") is a Semgrep rule match.
+Local `golangci-lint` does not run Codacy or Semgrep; they fire only after push.
+Codacy runs Semgrep underneath, so a Codacy `action_required` finding with a
+prose message ("The application dynamically constructs file or path
+information.", "…This bypasses HTML escaping…") is a Semgrep rule match.
 
-The only form that suppresses **and** still satisfies a godot-enabled lint is an
-inline `nosemgrep` directive naming the exact rule id:
+Suppress with an inline `nosemgrep` directive naming the exact rule id. It is
+the only form that both suppresses and satisfies a godot-enabled lint:
 
 ```go
 offending_line() // nosemgrep: <exact-rule-id>
 ```
 
-Rules:
-- **Inline at the end of the offending line.** A comment on the line above is
-  silently ignored.
-- **Use the literal `id:` field** from the upstream Semgrep YAML rule. Codacy
-  parses the text after the colon as a rule id; freeform prose is interpreted as
-  a (non-matching) rule id and the suppression no-ops.
-- **godot is fine** with this form — single-identifier comments are treated as
-  directives and skipped, even with `period: true`.
+| Rule                                                 | Why                                                                                                    |
+|------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| Inline, at the end of the offending line             | A comment on the line above is ignored.                                                                |
+| Use the literal `id:` from the upstream Semgrep YAML | Codacy reads the text after the colon as a rule id; prose is a non-matching id and suppresses nothing. |
+| godot is fine with it                                | A single-identifier comment is treated as a directive and skipped, even with `period: true`.           |
 
-### Finding the rule id (in this order)
+### Finding the rule id
 
-1. **Grep the same repo first** — most rules are already suppressed somewhere:
-   ```bash
-   grep -rn "nosemgrep:" .
-   ```
-2. **Search GitHub semgrep-rules forks for the exact message text:**
+1. Grep the repo first. Most rules are already suppressed somewhere: `grep -rn "nosemgrep:" .`
+2. Search GitHub for the exact Codacy message, then copy the `id:` **verbatim**. It is often namespaced (`go_filesystem_rule-fileread`, not `rule-fileread`).
+
    ```bash
    gh api -X GET search/code --field q='"<exact codacy message>" extension:yaml'
    ```
-   Open the matched YAML and copy the `id:` field **verbatim** (often namespaced,
-   e.g. `go_filesystem_rule-fileread`, not the short tail `rule-fileread`).
 
-### Commonly-seen rule ids (Go)
+### Commonly seen ids (Go)
 
-| Pattern | Rule id |
-|---|---|
-| `w.Write(...)` direct ResponseWriter write | `no-direct-write-to-responsewriter` |
-| `os.ReadFile(filepath.Join(...))` dynamic file path | `go_filesystem_rule-fileread` |
-| `import "math/rand"` / `"math/rand/v2"` | `math-random-used` |
-| `import "text/template"` | `import-text-template` |
+| Pattern                                             | Rule id                             |
+|-----------------------------------------------------|-------------------------------------|
+| `w.Write(...)` direct ResponseWriter write          | `no-direct-write-to-responsewriter` |
+| `os.ReadFile(filepath.Join(...))` dynamic file path | `go_filesystem_rule-fileread`       |
+| `import "math/rand"` / `"math/rand/v2"`             | `math-random-used`                  |
+| `import "text/template"`                            | `import-text-template`              |
 
-### Forms that DON'T work (don't waste a CI cycle on these)
+### Forms that do not work
 
-- `// #nosec G304` / `// nolint:gosec` — wrong tool, Codacy ignores.
-- `// nosemgrep -- prose` — suppresses Codacy but trips godot.
-- `// nosemgrep: Capitalized prose.` — passes godot, but Codacy reads
-  "Capitalized" as a rule id, no match → no suppression.
-- `// nosemgrep: <rule-id>` placed on the line above — Codacy ignores.
-- Bare `// nosemgrep` — works in repos *without* godot, but trips godot's
-  period/capital checks where it's enabled.
+Do not spend a CI cycle on these:
 
-When the offending code is *whole-repo test infrastructure* (an entire helper
-package living in non-`_test.go` files), prefer adding the path to
-`.codacy.yaml` `exclude_paths` over per-line comments — discuss with the
-reviewer first; the inline comment is the safer default.
+| Form                                        | Why it fails                                                           |
+|---------------------------------------------|------------------------------------------------------------------------|
+| `// #nosec G304`, `// nolint:gosec`         | Wrong tool; Codacy ignores them.                                       |
+| `// nosemgrep -- prose`                     | Suppresses Codacy but trips godot.                                     |
+| `// nosemgrep: Capitalized prose.`          | Passes godot, but Codacy reads "Capitalized" as a rule id; no match.   |
+| `// nosemgrep: <rule-id>` on the line above | Codacy ignores it.                                                     |
+| Bare `// nosemgrep`                         | Fine without godot; trips godot's period/capital checks where enabled. |
+
+When the flagged code is a whole helper package of test infrastructure living in
+non-`_test.go` files, `.codacy.yaml` `exclude_paths` beats per-line comments.
+Discuss with the reviewer first; the inline comment is the safer default.
 
 ## Done
 
-- All passed → **"Clean."**
-- Had to fix something → briefly say what and what changed.
+All passed → **"Clean."** Otherwise say briefly what you fixed, what was skipped
+(infra-bound tests) and any pre-existing findings outside the diff.
