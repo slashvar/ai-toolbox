@@ -14,154 +14,106 @@ description: >
 
 # pr-sync
 
-Sync the current PR branch with the default branch using merge, then report
-PR status. The merge strategy avoids force-pushes, which is important once a
-branch has been shared with reviewers or CI.
+Merge the default branch into the current PR branch, then report PR status.
+Merging never rewrites history, so no force-push is needed once reviewers or CI
+have seen the branch.
 
 ## Step 1 — Identify context
 
-Run these in parallel:
-
 ```bash
 git branch --show-current
-git remote show origin | grep 'HEAD branch'
-git log --oneline -1
+gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
 ```
 
-From these, determine:
-- **current branch**: the branch you're on
-- **default branch**: whatever `HEAD branch` reports (typically `main` or `master`)
-
-If the current branch IS the default branch, stop and tell the user — this
-skill is for PR branches, not the default branch.
+If the current branch is the default branch, stop: this skill is for PR branches.
 
 ## Step 2 — Check PR state
 
-Before any git operations, verify the PR is still open:
+Fetch state and checks in one call; Step 4 reuses the checks.
 
 ```bash
-gh pr view --json state --jq .state
+gh pr view --json state,statusCheckRollup
 ```
 
-- **OPEN**: proceed to Step 3.
-- **MERGED**: skip to Step 7 (status). Tell the user the PR is already merged —
-  no sync needed. Suggest `git checkout <default-branch> && git pull` to get
-  back on the default branch.
-- **CLOSED**: skip to Step 7. Tell the user the PR is closed.
-- **No PR found**: tell the user no PR exists for this branch and suggest `/pr`.
+| State               | Action                                                                                            |
+|---------------------|---------------------------------------------------------------------------------------------------|
+| `OPEN`              | Continue to Step 3.                                                                               |
+| `MERGED` / `CLOSED` | Skip to Step 6. Tell the user; for `MERGED`, suggest `git checkout <default-branch> && git pull`. |
+| No PR               | Tell the user and suggest `/pr`.                                                                  |
 
-This guard prevents accidentally merging main into a branch whose PR has already
-landed.
+This guard stops you merging the default branch into a PR that already landed.
 
 ## Step 3 — Fetch and check if sync is needed
 
 ```bash
 git fetch origin <default-branch>
-git merge-base --is-ancestor origin/<default-branch> HEAD && echo "UP_TO_DATE" || echo "NEEDS_MERGE"
+git merge-base --is-ancestor origin/<default-branch> HEAD && echo UP_TO_DATE || echo NEEDS_MERGE
 ```
 
-If `UP_TO_DATE`: skip to Step 7 (status check). Tell the user the branch is
-already up to date with `origin/<default-branch>`.
+If `UP_TO_DATE`, skip to Step 6 and say so.
 
 ## Step 4 — Surface CI status before merging
 
-Before changing the branch, check whether the current head commit has failing
-CI checks. Burying a pre-existing failure under a merge commit muddies the
-debugging trail — the user can't tell from the next run whether the failure
-is theirs or came from `main`.
+A merge commit buries a pre-existing failure: the next run cannot show whether
+the failure is the branch's or came from the default branch. From the Step 2
+`statusCheckRollup`, select checks whose `conclusion` is `FAILURE`, `CANCELLED`,
+`TIMED_OUT` or `STARTUP_FAILURE`.
 
-```bash
-gh pr view --json statusCheckRollup \
-  --jq '[.statusCheckRollup[]? | select(.conclusion == "FAILURE" or .conclusion == "CANCELLED" or .conclusion == "TIMED_OUT" or .conclusion == "STARTUP_FAILURE")
-         | {name, conclusion, url: (.detailsUrl // .targetUrl)}]'
-```
+If any exist, list them (name + `detailsUrl`/`targetUrl`) and ask whether to
+merge anyway or fix against the un-merged baseline first. Wait for the answer.
+In-progress or queued checks are not blockers; mention them and continue.
 
-If the array is non-empty:
-
-1. List the failing checks (name + URL) to the user.
-2. Ask whether to proceed with the merge anyway, or stop so the user can fix
-   the failure first against the un-merged baseline.
-3. Do NOT proceed automatically — wait for the user's decision.
-
-In-progress / queued checks are not blockers; mention them in passing if
-they're the only signal, but continue.
-
-## Step 5 — Merge (not rebase)
-
-The branch is already pushed to origin, so rebase would rewrite history and
-require a force-push. Merge preserves the existing commit history.
+## Step 5 — Merge, build, push
 
 ```bash
 git merge origin/<default-branch> --no-edit
 ```
 
-**If the merge succeeds**: verify it still builds before pushing (Step 6),
-then push.
-
-**If there are merge conflicts**: stop. Show the user:
-1. Which files conflict (`git diff --name-only --diff-filter=U`)
-2. The conflict markers in each file (read them)
-3. Tell the user to resolve conflicts manually, then run `/pr-sync` again
-
-Do NOT attempt to auto-resolve conflicts. Do NOT run `git merge --abort`
-unless the user asks — they may want to resolve in place.
-
-## Step 6 — Verify the merge result builds, then push
-
-A clean merge does NOT mean the code compiles. If the default branch changed a
-function signature, renamed a symbol, or moved a package, `git merge` reports
-success while the merged tree no longer builds — there's no conflict signal for
-a semantic break. Pushing that straight to origin hands reviewers and CI a
-broken branch that *you* introduced by syncing.
-
-Run a quick build/test of the packages this branch touches before pushing:
-
-- If a repo/language-specific check skill is installed (e.g. `go-check`), prefer
-  it, scoped to the touched packages.
-- Otherwise build the changed packages directly. For a Go repo:
+Never pipe or wrap the merge (`| tail`, `| tee`): the pipe hides a non-zero exit,
+and a later "build OK" then runs on a conflicted tree. Confirm the merge is clean
+before building:
 
 ```bash
-# Build the packages this branch changed relative to the default branch.
-git diff --name-only origin/<default-branch>...HEAD -- '*.go' \
-  | xargs -r -n1 dirname | sort -u | sed 's|^|./|' \
-  | xargs -r go build
+git diff --name-only --diff-filter=U    # must print nothing
 ```
 
-For other languages, substitute the repo's equivalent build/compile check. If
-the repo has no fast build check, note in the summary that no local build
-verification ran.
+**Conflicts**: stop. Show the conflicting files and their markers, and tell the
+user to resolve them and re-run `/pr-sync`. Do not auto-resolve. Do not
+`git merge --abort` unless asked; the user may want to resolve in place.
 
-- **Build passes**: push.
+**Clean merge**: a clean merge does not mean the code compiles. A changed
+signature, a renamed symbol or a moved package merges without a conflict signal,
+and pushing it hands reviewers and CI a broken branch. Build what the branch
+touches first:
+
+- If a check skill for the stack is installed (e.g. `go-check`), use it on the
+  touched packages.
+- Otherwise build the changed packages directly. Go:
 
   ```bash
-  git push
+  # Dirs of changed files that carry no //go:build constraint.
+  git diff --name-only --diff-filter=d origin/<default-branch>...HEAD -- '*.go' |
+    while read -r f; do grep -q '^//go:build' "$f" || dirname "$f"; done |
+    sort -u | sed 's|^|./|' | xargs -r go build
   ```
 
-- **Build fails**: stop. Show the error. The merge is on the local branch but
-  NOT yet pushed — the user fixes the break on this branch, commits, and pushes
-  (or re-runs `/pr-sync`, which is now up to date and skips to the status check).
+  Files behind a build tag (e.g. `e2e`) are skipped, because a dir whose files
+  are all excluded fails `go build`. List them (`grep -l '^//go:build'` over the
+  changed files) and vet each tagged dir with `go vet -tags <tag> ./dir`.
+- Other stacks: use the repo's equivalent compile check. If none is fast, say in
+  the summary that no local build verification ran.
 
-## Step 7 — Show PR status
+If the build passes, `git push`. If it fails, stop and show the error. The merge
+is local and unpushed: the user fixes the break, commits and pushes (or re-runs
+`/pr-sync`, which will skip to Step 6).
 
-Find the PR for the current branch and display its status:
+## Step 6 — Show PR status
 
 ```bash
-gh pr view --json number,title,state,mergeable,statusCheckRollup,reviews,url \
-  --jq '{
-    number: .number,
-    title: .title,
-    state: .state,
-    mergeable: .mergeable,
-    url: .url,
-    checks: [.statusCheckRollup[]? | {name: .name, status: .status, conclusion: .conclusion}],
-    reviews: [.reviews[]? | {author: .author.login, state: .state}]
-  }'
+gh pr view --json number,title,state,mergeable,statusCheckRollup,reviews,url
 ```
 
-Present a clean summary:
-- PR number, title, URL
-- Mergeable status (MERGEABLE / CONFLICTING / UNKNOWN)
-- CI checks: name + status (passed/failed/in-progress)
-- Reviews: author + state (APPROVED / CHANGES_REQUESTED / COMMENTED)
-
-If no PR exists for this branch, say so and suggest `/pr` to create one.
+Summarize: number, title, URL; mergeable (`MERGEABLE` / `CONFLICTING` /
+`UNKNOWN`); checks (name + passed/failed/in-progress); reviews (author +
+`APPROVED` / `CHANGES_REQUESTED` / `COMMENTED`). With no PR, say so and suggest
+`/pr`.
