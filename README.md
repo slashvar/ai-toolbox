@@ -23,7 +23,7 @@ Each subdirectory under `skills/` is self-contained: it ships an installable `sk
 skills/<name>/
 ├── README.md        # overview + install/uninstall
 ├── install.sh       # symlinks skill/ into ~/.claude/skills/<name>
-├── skill/           # the installable payload (SKILL.md, references/, evals/)
+├── skill/           # the installable payload (SKILL.md, references/, scripts/, evals/)
 └── research/        # exercises, learnings, and patterns that produced the skill
 ```
 

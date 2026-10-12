@@ -10,21 +10,10 @@ The skill triggers when reviewing, simplifying, or refactoring code; during TDD 
 
 ## Install
 
-```sh
-./install.sh
-```
-
-This symlinks `skill/` into `~/.claude/skills/corner-cases`. Because it's a symlink, any edit in this repo is immediately live in Claude Code — no re-install needed.
-
-If `~/.claude/skills/corner-cases` already exists as a regular directory, the installer refuses to overwrite it. Remove or move it first.
-
-## Uninstall
-
-```sh
-rm ~/.claude/skills/corner-cases
-```
-
-Safe because the install is a symlink — only the link is removed, the repo is untouched.
+`./install.sh` symlinks `skill/` into `~/.claude/skills/corner-cases`, so edits in this
+repo are live immediately. It refuses to overwrite a real directory there:
+remove or move it first. Uninstall with `rm ~/.claude/skills/corner-cases` (removes only
+the link).
 
 ## Layout
 
@@ -34,14 +23,14 @@ corner-cases/
 │   ├── SKILL.md                 # entry point loaded by Claude Code
 │   ├── references/
 │   │   ├── patterns.md          # pattern catalog under 3 principles
-│   │   └── examples.md          # worked examples from the research exercises
+│   │   └── examples.md          # before/after snippets from exercises and real refactors
 │   └── evals/
 │       └── evals.json           # runnable via skill-creator
 └── research/                    # work that produced the skill
     ├── CLAUDE.md                # per-project coding guidelines (scoped to this project)
     ├── PATTERNS.md              # long-form pattern catalog
     ├── LEARNINGS.md             # observations from each exercise
-    └── exercises/               # example code: list, btree, spanner, etc.
+    └── exercises/               # example code: list, list-tdd, btree, spanner
 ```
 
 ## Running evals
