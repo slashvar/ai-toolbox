@@ -1,72 +1,47 @@
 # go-check
 
-A Claude Code skill that runs the **Go quality pipeline** (lint → test) for any
-Go repository. It scopes to the packages you actually touched for fast pre-push
-checks, matches CI's pinned `golangci-lint` version so local runs reproduce CI,
-and knows how to suppress the static-analysis false positives that only fire
-post-push (Codacy/Semgrep).
+A Claude Code skill that runs the **Go quality pipeline** (lint → test) for any Go
+repository. It scopes to the changed packages for fast pre-push checks, gates only
+on issues the diff introduces (reporting older findings separately), matches CI's
+pinned `golangci-lint` so local runs reproduce CI, handles infra-bound tests and
+build-tagged dirs, and knows how to suppress static-analysis false positives that
+fire only post-push (Codacy/Semgrep).
 
 ## How it works
 
-1. **Setup** — detect and install the `golangci-lint` version pinned in
-   `.github/workflows/` so local lint matches CI (godot/revive rules a stale
-   binary would skip).
-2. **Quick check** — `golangci-lint run` + `go test` scoped to the changed
-   package(s), not `./...`. Fix-and-re-run loop on failure.
-3. **Full pipeline** — whole-repo lint + `go test -race` (with integration/nightly
-   build tags if CI uses them) for pre-merge sweeps.
-4. **Codacy/Semgrep** — the verified inline `nosemgrep: <rule-id>` suppression
-   form (the only one that satisfies a `godot`-enabled lint), a table of
-   commonly-seen rule ids, and the recipe for finding new ones.
+1. **Setup**: install the `golangci-lint` version pinned in `.github/workflows/`, so rules a stale binary would skip still run.
+2. **Quick check**: lint (`--new-from-rev`) and `go test` on the changed packages, not `./...`; fix and re-run on failure.
+3. **Full pipeline**: whole-repo lint and `go test -race`, with CI's build tags, for pre-merge sweeps.
+4. **Infra-bound tests**: skip with the repo's unit target, `-skip` or `-short`, and say so.
+5. **Codacy/Semgrep**: the inline `nosemgrep: <rule-id>` form that satisfies a `godot`-enabled lint, common rule ids, and how to find new ones.
 
 ## Install
 
-```sh
-./install.sh
-```
-
-This symlinks `skill/` into `~/.claude/skills/go-check`. Because it's a symlink,
-any edit in this repo is immediately live in Claude Code — no re-install needed.
-
-If `~/.claude/skills/go-check` already exists as a regular directory, the
-installer refuses to overwrite it. Remove or move it first.
-
-## Uninstall
-
-```sh
-rm ~/.claude/skills/go-check
-```
-
-Safe because the install is a symlink — only the link is removed, the repo is
-untouched.
+`./install.sh` symlinks `skill/` into `~/.claude/skills/go-check`, so edits in this
+repo are live immediately. It refuses to overwrite a real directory there:
+remove or move it first. Uninstall with `rm ~/.claude/skills/go-check` (removes only
+the link).
 
 ## Layout
 
-```
+```text
 go-check/
-├── README.md            # this file
-├── install.sh           # symlinks skill/ into ~/.claude/skills/go-check
+├── README.md
+├── install.sh       # symlinks skill/ into ~/.claude/skills/go-check
 └── skill/
-    ├── SKILL.md         # entry point loaded by Claude Code
-    └── evals/
-        └── evals.json   # runnable via skill-creator
+    ├── SKILL.md
+    └── evals/evals.json   # runnable via skill-creator
 ```
 
 ## Requirements
 
-- Go toolchain (`go`).
-- `golangci-lint` (the skill can install the CI-pinned version for you).
-- `gh` (GitHub CLI) — only for the GitHub code-search recipe used to look up
-  Semgrep rule ids.
+- Go toolchain and `golangci-lint` (the skill can install the CI-pinned version).
+- `gh`, only for the Semgrep rule-id search recipe.
 
 ## History
 
-Generalized from `algolia-go-check` in June 2026. De-personalized changes: the
-`~/go/src/github/algolia/` monorepo paths and module layout
-(`./modules/services/<area>/internal/...`, `make test-incremental`) became
-generic package-scoped paths and standard `go test` invocations; the eval
-prompts dropped their Algolia paths. The Codacy/Semgrep suppression section was
-**kept by request** — Codacy, Semgrep, and `godot` are general-purpose tools —
-with only the Algolia repo names (`metis`, `bag-of-docs`) and "verified Apr 2026"
-provenance stripped out; the rule-id table and the inline-`nosemgrep` mechanics
-are unchanged.
+Generalized in June 2026 from a monorepo-specific skill: monorepo paths and
+module layout became package-scoped paths and standard `go test` calls, and the
+eval prompts lost their private paths. The Codacy/Semgrep section was kept
+because those tools and `godot` are general-purpose; only repo names and
+verification dates were stripped.
