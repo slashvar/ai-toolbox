@@ -1,13 +1,14 @@
 # pr-restack
 
-A Claude Code skill that **re-aligns a chain of stacked DRAFT pull requests**. It
-chain-rebases each branch onto its parent (the bottom onto the default branch),
-build-checks each branch, then pushes with `--force-with-lease`, so child PRs
-show only their own commits.
+A Claude Code skill that **re-aligns a chain of stacked pull requests**. It updates
+each branch onto its parent (the bottom onto the default branch), build-checks
+each branch, then pushes, so child PRs show only their own commits.
 
-It is the rebase counterpart to `/pr-sync` and the two are mutually exclusive:
-`/pr-sync` merges (safe for ready PRs, no force-push); `/pr-restack` rewrites
-history, so it hard-aborts if any PR in the stack is not a draft.
+The strategy is per branch: drafts are rebased and pushed with
+`--force-with-lease`; ready-for-review PRs are merged as `/pr-sync` does, never
+force-pushed. Ready PRs must sit below the drafts. In a repo whose
+`CONTRIBUTING.md` requires GitHub Stacked PRs, it drives the stack with
+`gh stack` (`--no-trunk` rebases only, no `submit`).
 
 ## Install
 
@@ -28,7 +29,8 @@ pr-restack/
 
 ## Requirements
 
-`git` and an authenticated `gh`. Optionally a stack check skill (e.g. `go-check`)
+`git` and an authenticated `gh`; the `gh stack` extension and its skill for repos
+that require GitHub Stacked PRs. Optionally a stack check skill (e.g. `go-check`)
 for the pre-push build check; otherwise the skill builds the touched packages itself.
 
 ## History
