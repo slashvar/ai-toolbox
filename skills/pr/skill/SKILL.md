@@ -104,6 +104,9 @@ Look in parallel for:
 Use a template as the skeleton, but **omit any section that would be empty**.
 Tick a contribution-criteria checkbox that references CONTRIBUTING.md (`- [x]`).
 
+If CONTRIBUTING.md restricts AI in PR text (descriptions, review comments), use
+[human-written description](#human-written-description) instead of drafting the body.
+
 Without a template:
 
 ```markdown
@@ -177,3 +180,17 @@ Scanners such as Codacy and Semgrep run only after push, not in local lint. If
 one flags a false positive, suppress it with the scanner's inline directive
 naming the exact rule id, not a freeform comment. For Go with Codacy/Semgrep, the
 `go-check` skill has the verified form, a rule-id table and a lookup recipe.
+
+## Human-written description
+
+For repos whose CONTRIBUTING.md forbids an LLM-written PR description. The human
+writes the prose; the skill only structures and proofreads it. Branch, commit and
+title steps are unchanged. Skip the Step 6 body constraints, and never fix the body with `gh pr edit`.
+
+1. Give the user a facts sheet in chat only: what changed, and the test and lint results. Do not draft or pre-fill the Summary or Test plan.
+2. Ask what to put in each template section: checkboxes, refs, AI disclosure, Summary, Test plan. Never tick a box (AI disclosure included) on the user's behalf.
+3. Build the body from the answers verbatim: template order, empty optional sections removed.
+4. Run an English pass on the user's text (grammar, spelling, articles, punctuation, code formatting) without changing wording or content, and show what changed. No need to ask first.
+5. Create with `gh pr create --body-file <temp file>`.
+
+Never write PR review comments or run automated reviews that post. Local review stays allowed.
