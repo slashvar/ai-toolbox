@@ -4,11 +4,9 @@ A Claude Code skill that **re-aligns a chain of stacked pull requests**. It upda
 each branch onto its parent (the bottom onto the default branch), build-checks
 each branch, then pushes, so child PRs show only their own commits.
 
-The strategy is per branch: drafts are rebased and pushed with
-`--force-with-lease`; ready-for-review PRs are merged as `/pr-sync` does, never
-force-pushed. Ready PRs must sit below the drafts. In a repo whose
-`CONTRIBUTING.md` requires GitHub Stacked PRs, it drives the stack with
-`gh stack` (`--no-trunk` rebases only, no `submit`).
+Drafts are rebased and pushed with `--force-with-lease`; ready PRs are merged,
+never force-pushed (details in `skill/SKILL.md`). Repos that require GitHub
+Stacked PRs are driven with `gh stack`.
 
 ## Install
 
